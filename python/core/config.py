@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""core.config — 配置加载、默认值合并与术语表解析。"""
+import json
+import os
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+DEFAULTS = {
+    "pdf_path": "",
+    "out_dir": "",                    # 留空则自动 <pdf>_translated/
+    "glossary": "",                   # 留空=不用术语表；可用内置名或绝对路径
+    "title": "",                      # 文档标题（留空则从 PDF 文件名推断）
+    "author": "",                     # 作者（可选）
+
+    "extract": {
+        "body_top": 80,               # 页眉过滤线（y 小于此值视为页眉）
+        "body_bottom": 730,           # 页码/版权过滤线（y 大于此值视为页脚）
+        "col_split": 300.0,           # 双栏分栏 x 中线；自动模式下由版面估计
+        "min_font": 8.9,              # 正文最小字号（低于此值视为图注/参考文献）
+        "tail_min_font": 7.0,         # 末页声明区保留的更低字号
+        "skip_references": True,       # 跳过参考文献列表
+        "skip_figure_captions": True,  # 跳过图注
+        "auto_layout": True,           # 自动识别单/双栏与分栏位置
+    },
+
+    "translation": {
+        "api_base": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "batch_chars": 2800,
+        "max_chunk": 900,
+        "max_tokens": 8192,
+        "concurrency": 4,
+        "temperature": 0.3,
+        "domain": "general",          # general | biomedical | anthropology | life-science
+        "system_prompt_file": "",      # 可选：自定义系统提示词文件（utf-8）
+    },
+
+    "render": {
+        "format": "docx",             # docx | epub | both
+        "docx_name": "",              # 留空自动 <书名>_中文翻译.docx
+        "epub_name": "",              # 留空自动 <书名>_中文版.epub
+    },
+}
+
+GLOSSARY_PRESETS = {
+    "biomedical": os.path.join(HERE, "glossaries", "biomedical.tsv"),
+    "anthropology": os.path.join(HERE, "glossaries", "anthropology.tsv"),
+    "general": os.path.join(HERE, "glossaries", "general.tsv"),
+    "": "",
+}
+
+
+def _deep_merge(base, over):
+    out = dict(base)
+    for k, v in (over or {}).items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def resolve_glossary(spec):
+    """把术语表 spec 解析为真实 TSV 路径；找不到返回空串。"""
+    if not spec:
+        return ""
+    if spec in GLOSSARY_PRESETS:
+        p = GLOSSARY_PRESETS[spec]
+        return p if os.path.exists(p) else ""
+    if os.path.exists(spec):
+        return spec
+    return ""
+
+
+def load_config(path=None):
+    cfg = _deep_merge(DEFAULTS, {})
+    if path and os.path.exists(path):
+        with open(path, "r", encoding="utf-8-sig") as f:
+            cfg = _deep_merge(cfg, json.load(f))
+    cfg["glossary"] = resolve_glossary(cfg.get("glossary", ""))
+    return cfg
+
+
+def build_default_config(pdf_path, out_dir=None):
+    cfg = _deep_merge(DEFAULTS, {})
+    cfg["pdf_path"] = os.path.abspath(pdf_path)
+    cfg["out_dir"] = out_dir or (os.path.splitext(os.path.abspath(pdf_path))[0] + "_translated")
+    return cfg

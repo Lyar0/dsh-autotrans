@@ -1,0 +1,3 @@
+# Python 3.10+ 推荐。DOCX 由标准库生成，无需 python-docx。
+pymupdf>=1.23
+ebooklib>=0.18

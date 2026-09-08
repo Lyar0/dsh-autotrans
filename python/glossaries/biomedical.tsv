@@ -1,0 +1,87 @@
+# 术语表：英文\t中文\t（可选备注）
+# 生信/空间转录组学术术语与专有名词，逐行并入翻译提示词以统一译名。
+# 厂商/平台/软件专有名词保留英文原样，不在此表（保持稳定）。
+
+spatial transcriptomics	空间转录组学
+single-cell transcriptomics	单细胞转录组学
+single-cell RNA sequencing (scRNA-seq)	单细胞RNA测序（scRNA-seq）
+in situ hybridization (ISH)	原位杂交（ISH）
+in situ sequencing (ISS)	原位测序（ISS）
+imaging-based spatial transcriptomics	基于成像的空间转录组学
+sequencing-based spatial transcriptomics	基于测序的空间转录组学
+array-based	基于芯片（阵列）的
+microdissection-based	基于显微切割的
+gene-spot matrix	基因-位点（spot）矩阵
+next-generation sequencing (NGS)	下一代测序（NGS）
+transcriptome	转录组
+transcript	转录本
+mRNA	信使RNA（mRNA）
+messenger RNA	信使RNA
+cDNA	互补DNA（cDNA）
+gene expression	基因表达
+gene	基因
+deconvolution	去卷积
+imputation	插补（填补）
+segmentation	分割（细胞分割）
+normalization	归一化
+library size	文库大小（测序文库规模）
+resolution	分辨率
+spatial resolution	空间分辨率
+capture efficiency	捕获效率
+capture area	捕获区域
+tissue section	组织切片
+fresh-frozen tissue	新鲜冷冻组织
+formalin-fixed, paraffin-embedded (FFPE)	福尔马林固定石蜡包埋（FFPE）
+cell-cell interaction	细胞-细胞互作（细胞间相互作用）
+ligand-receptor	配体-受体
+hybridization	杂交
+fluorophore	荧光基团（荧光染料）
+probe	探针
+barcode	条形码
+spatially-barcoded	空间条形码
+single cell	单细胞
+single-nucleus RNA-seq	单细胞核RNA测序
+microfluidics	微流控
+droplet	液滴
+cell type	细胞类型
+tissue domain	组织区域（结构域）
+autofluorescence	自发荧光
+immunohistochemistry	免疫组织化学
+staining	染色
+hypothesis testing	假设检验
+hypothesis generation	假设生成（发现性研究）
+complement genes	补体基因
+oligodendrocyte	少突胶质细胞
+microglia	小胶质细胞
+myeloid cells	髓系细胞
+lymphocyte	淋巴细胞
+macrophage	巨噬细胞
+fibroblast	成纤维细胞
+epithelial cell	上皮细胞
+neuron	神经元
+endometrium	子宫内膜
+melanoma	黑色素瘤
+colorectal cancer	结直肠癌
+breast cancer	乳腺癌
+glioblastoma	胶质母细胞瘤
+Alzheimer's disease	阿尔茨海默病
+amyloid plaque	淀粉样斑块
+atlas	图谱
+Human Cell Atlas (HCA)	人类细胞图谱（HCA）
+pre-processing	预处理
+downstream analysis	下游分析
+spatially variable gene	空间变异基因
+differential gene expression	差异基因表达
+dimensionality reduction	降维
+clustering	聚类
+microscopy	显微成像/显微镜检查
+imaging	成像
+assay	检测/实验（测定）
+platform	平台
+commercial	商业化的
+commercialization	商业化
+developmental biology	发育生物学
+immunology	免疫学
+neuroscience	神经科学
+cancer	癌症/肿瘤
+bioinformatics	生物信息学

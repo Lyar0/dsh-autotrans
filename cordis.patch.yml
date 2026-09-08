@@ -1,0 +1,22 @@
+# dsh-autotrans bundle patch: one insert over the profile's entry list.
+#
+# Registers the `autotrans` tool on the host plane, so every agent preset in
+# the profile can call it. Config below are defaults; a user overrides them in
+# the profile's own cordis.patch.yml by targeting the row id:
+#
+#   - id: tool-autotrans
+#     config:
+#       python: python3        # interpreter that has pymupdf + ebooklib
+#       model: deepseek-chat
+#       concurrency: 4
+#
+# or disables the tool entirely with `- id: tool-autotrans` + `disabled: true`.
+
+- insert:
+    - id: tool-autotrans
+      name: dsh-autotrans
+      config:
+        python: python
+        model: deepseek-chat
+        concurrency: 4
+        format: docx

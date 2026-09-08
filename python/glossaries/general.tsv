@@ -1,0 +1,29 @@
+# 术语表：英文\t中文\t（可选备注）
+# 通用学术术语；逐行翻译时并入提示词以统一译名。可自行增删。
+
+e.g.	例如
+i.e.	即
+et al.	等（等人）
+in situ	原位
+in vitro	体外
+in vivo	体内
+de novo	从头（新生）
+versus (vs.)	与……相比（对比）
+hypothesis	假设
+hypothesis testing	假设检验
+hypothesis generation	假设生成（发现性研究）
+methodology	方法论
+framework	框架
+paradigm	范式
+protocol	方案（实验规程）
+pipeline	流程（流水线）
+workflow	工作流
+dataset	数据集
+benchmark	基准测试
+state-of-the-art	最先进的（当前领先的）
+novel	新颖的
+robust	稳健的
+seminal	开创性的
+comprehensive	全面的
+systematic	系统性的
+empirical	经验性的（实证的）

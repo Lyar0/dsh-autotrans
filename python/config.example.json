@@ -1,0 +1,31 @@
+{
+  "glossary": "biomedical",
+  "title": "",
+  "author": "",
+  "extract": {
+    "body_top": 80,
+    "body_bottom": 730,
+    "col_split": 300.0,
+    "min_font": 8.9,
+    "tail_min_font": 7.0,
+    "skip_references": true,
+    "skip_figure_captions": true,
+    "auto_layout": true
+  },
+  "translation": {
+    "api_base": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "batch_chars": 2800,
+    "max_chunk": 900,
+    "max_tokens": 8192,
+    "concurrency": 4,
+    "temperature": 0.3,
+    "domain": "general",
+    "system_prompt_file": ""
+  },
+  "render": {
+    "format": "docx",
+    "docx_name": "",
+    "epub_name": ""
+  }
+}

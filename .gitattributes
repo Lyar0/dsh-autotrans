@@ -1,0 +1,13 @@
+# Normalize line endings and mark vendored data as binary where appropriate.
+* text=auto eol=lf
+
+# Python sources
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.tsv text eol=lf
+
+# Markdown / docs
+LICENSE text eol=lf

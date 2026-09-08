@@ -1,0 +1,32 @@
+{
+  "name": "dsh-autotrans",
+  "version": "1.0.0",
+  "description": "DSH plugin bundle: translate English academic PDFs/books into Chinese via the DeepSeek API (extract → translate → DOCX/EPUB), with glossary constraints and resumable translation.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "deepseek",
+    "translation",
+    "pdf",
+    "docx",
+    "epub",
+    "plugin",
+    "bundle"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
