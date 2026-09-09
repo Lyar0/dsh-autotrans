@@ -6,17 +6,21 @@
 #
 #   - id: tool-autotrans
 #     config:
-#       python: python3        # interpreter that has pymupdf + ebooklib
+#       python: python3        # or a path to dist/autotrans/autotrans.exe
 #       model: deepseek-chat
 #       concurrency: 4
 #
 # or disables the tool entirely with `- id: tool-autotrans` + `disabled: true`.
+#
+# config.python forms: "auto" (default) uses a packaged runtime dropped into
+# <plugin>/runtime/autotrans.exe (scripts/get-runtime.ps1) and falls back to a
+# system `python`; an existing autotrans.exe / python path is used directly.
 
 - insert:
     - id: tool-autotrans
       name: dsh-autotrans
       config:
-        python: python
+        python: auto
         model: deepseek-chat
         concurrency: 4
         format: docx

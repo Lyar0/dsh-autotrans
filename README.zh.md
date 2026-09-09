@@ -24,13 +24,47 @@ PDF → 提取（结构化文本）→ 翻译（DeepSeek，术语表 + 断点续
 ## 依赖
 
 - 运行中的 DSH，且 `PATH` 里有 `pnpm`（供 `dsh plugin` 使用）。
-- Python **3.10+**，且插件所调用的解释器（默认 `python`）装好流水线依赖：
 
-  ```sh
-  pip install pymupdf ebooklib
-  ```
+插件运行用的解释器可以是三种之一（见下文「自带运行时」，或纯 Python 段）：
 
-  `pymupdf` 是提取必需；`ebooklib` 仅在输出 EPUB 时需要（DOCX 无需第三方包）。
+1. **预构建的自带运行时**（推荐）——设备上无需装 Python。
+2. **系统 Python**（Python **3.10+**）并装好流水线依赖：
+
+   ```sh
+   pip install pymupdf ebooklib
+   ```
+
+   `pymupdf` 是提取必需；`ebooklib` 仅在输出 EPUB 时需要（DOCX 无需第三方包）。
+
+## 自带运行时（无需系统 Python）
+
+`scripts/build-runtime.ps1` 会把 AutoTrans 的 Python 核心**连同依赖**封装成 Windows x64
+运行时，即使设备没装系统 Python 也能直接运行。插件 `config.python` 默认是 `auto`，会自动
+使用放在 `<plugin>/runtime/autotrans.exe` 的运行时。
+
+**先在本机构建一次**（需要装有 `pymupdf`、`ebooklib`、`pyinstaller` 的 Python）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-runtime.ps1 -Python D:/Projects/CondaEnvs/booktrans/python.exe
+# 产出 dist/autotrans/ 与 dist/autotrans-win-x64.zip（约 30 MB）
+```
+
+**发布**：把 `dist/autotrans-win-x64.zip` 作为本仓库某个 GitHub Release 的附件上传。
+新设备拉取一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/get-runtime.ps1
+# 从最新 release 下载 autotrans-win-x64.zip，并把 autotrans.exe 放到 <plugin>/runtime/，
+# 插件的 "auto" python 模式会自动识别
+```
+
+之后无需改任何配置即可调用：
+
+```
+dist/autotrans/autotrans.exe --help
+```
+
+也可直接把 `config.python` 指向该 exe 路径（或含 `autotrans.exe` 的目录）以跳过自动检测。
 
 ## 装入 DSH
 
@@ -99,7 +133,7 @@ python python/autotrans.py render   paper.pdf
 ```yaml
 - id: tool-autotrans
   config:
-    python: python3            # 已装 pymupdf + ebooklib 的解释器
+    python: auto              # auto=自带运行时，否则系统 python；或 exe 绝对路径
     model: deepseek-chat
     concurrency: 4
     format: docx
@@ -120,7 +154,7 @@ python python/autotrans.py render   paper.pdf
 ```
 dsh-autotrans/
 ├─ package.json            # dsh.bundle.patch → cordis.patch.yml（零运行时依赖）
-├─ cordis.patch.yml        # 插入 tool-autotrans 行
+├─ cordis.patch.yml        # 插入 tool-autotrans 行（config.python: auto）
 ├─ lib/
 │  └─ index.js             # cordis 插件：注册 `autotrans` 工具
 ├─ python/
@@ -128,6 +162,11 @@ dsh-autotrans/
 │  ├─ core/                # config / extract / translate / render
 │  ├─ glossaries/          # general / biomedical / anthropology TSV
 │  └─ config.example.json
+├─ scripts/
+│  ├─ build-runtime.ps1    # 把 python 核心封装成自带运行时（Windows x64）
+│  └─ get-runtime.ps1      # 从 GitHub Release 拉取预构建运行时
+├─ dist/                   # 构建产物（git 忽略）：autotrans/ + autotrans-win-x64.zip
+├─ runtime/                # 解压出的运行时（git 忽略）：autotrans.exe + _internal/
 ├─ requirements.txt
 ├─ README.md / README.zh.md
 └─ LICENSE

@@ -5,6 +5,7 @@ __pycache__/
 .eggs/
 build/
 dist/
+runtime/          # self-contained runtime downloaded via scripts/get-runtime.ps1
 .venv/
 venv/
 env/

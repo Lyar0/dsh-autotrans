@@ -29,15 +29,52 @@ Python core; the Node plugin is a thin, zero-dependency process wrapper.
 ## Requirements
 
 - A running DSH with `pnpm` on `PATH` (for `dsh plugin`).
-- Python **3.10+** with the pipeline dependencies available to whichever interpreter the
-  plugin invokes (default `python`):
 
-  ```sh
-  pip install pymupdf ebooklib
-  ```
+The interpreter the plugin runs can be one of three things (see "Self-contained
+runtime" below, or the plain-Python section):
 
-  `pymupdf` is required for extraction; `ebooklib` is only required for EPUB output
-  (DOCX needs no third-party package).
+1. **A prebuilt self-contained runtime** — recommended. No Python install needed on the
+   device.
+2. **A system Python** (Python **3.10+**) with the pipeline dependencies:
+
+   ```sh
+   pip install pymupdf ebooklib
+   ```
+
+   `pymupdf` is required for extraction; `ebooklib` is only required for EPUB output
+   (DOCX needs no third-party package).
+
+## Self-contained runtime (no system Python needed)
+
+`scripts/build-runtime.ps1` packages the AutoTrans Python core **and its dependencies**
+into a Windows x64 runtime that runs without any system Python installed. The plugin's
+`config.python` default is `auto`, which automatically uses a runtime placed at
+`<plugin>/runtime/autotrans.exe`.
+
+**Build once (on Windows, in a Python that has `pymupdf`, `ebooklib`, `pyinstaller`):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-runtime.ps1 -Python D:/Projects/CondaEnvs/booktrans/python.exe
+# produces dist/autotrans/  and  dist/autotrans-win-x64.zip (~30 MB)
+```
+
+**Publish** the resulting `dist/autotrans-win-x64.zip` as a GitHub Release asset of this
+repo (tag it, then upload the zip). New devices fetch it once:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/get-runtime.ps1          # owner/repo default to this repo
+# downloads autotrans-win-x64.zip from the latest release and drops autotrans.exe
+# into <plugin>/runtime/, which the plugin's "auto" python mode detects
+```
+
+A single `autotrans.exe` invocation needs no config edit after that:
+
+```
+dist/autotrans/autotrans.exe --help
+```
+
+You can also point `config.python` directly at the exe path (or at a directory that
+contains `autotrans.exe`) to bypass auto-detection.
 
 ## Install into DSH
 
@@ -109,7 +146,7 @@ the profile's own `cordis.patch.yml` (see
 ```yaml
 - id: tool-autotrans
   config:
-    python: python3            # interpreter that has pymupdf + ebooklib
+    python: auto              # auto = packaged runtime, else system python; or an exe path
     model: deepseek-chat
     concurrency: 4
     format: docx
@@ -131,7 +168,7 @@ prompts, and output file names.
 ```
 dsh-autotrans/
 ├─ package.json            # dsh.bundle.patch → cordis.patch.yml (zero runtime deps)
-├─ cordis.patch.yml        # inserts the tool-autotrans row
+├─ cordis.patch.yml        # inserts the tool-autotrans row (config.python: auto)
 ├─ lib/
 │  └─ index.js             # cordis plugin: registers the `autotrans` tool
 ├─ python/
@@ -139,6 +176,11 @@ dsh-autotrans/
 │  ├─ core/                # config / extract / translate / render
 │  ├─ glossaries/          # general / biomedical / anthropology TSV
 │  └─ config.example.json
+├─ scripts/
+│  ├─ build-runtime.ps1    # package python core → self-contained runtime (Windows x64)
+│  └─ get-runtime.ps1      # fetch the prebuilt runtime zip from a GitHub Release
+├─ dist/                   # build output (git-ignored): autotrans/ + autotrans-win-x64.zip
+├─ runtime/                # extracted runtime (git-ignored): autotrans.exe + _internal/
 ├─ requirements.txt
 ├─ README.md / README.zh.md
 └─ LICENSE

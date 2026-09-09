@@ -3,8 +3,18 @@
 """core.config — 配置加载、默认值合并与术语表解析。"""
 import json
 import os
+import sys
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def base_dir():
+    """项目根：源码运行时为仓库 python/ 目录；PyInstaller 冻结时为解包数据目录。"""
+    if getattr(sys, "frozen", False):
+        # onedir/onefile：附加的数据文件（glossaries）在 _MEIPASS 下
+        return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+HERE = base_dir()
 
 DEFAULTS = {
     "pdf_path": "",
