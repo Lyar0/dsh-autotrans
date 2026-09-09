@@ -197,6 +197,10 @@ file lives outside the plugin's own folder, so a plugin reinstall does not erase
   embedded image (e.g. a methods figure) is written to `<out>/images/` and inserted into the
   DOCX where its PDF page begins, scaled to fit the page width, so the figures travel with the
   translation. (Figures are kept out of the EPUB.)
+- **No mid-paragraph fragmentation from column/page breaks**: when a paragraph that started
+  in one PDF column/page continues into the next without a sentence terminator, the extractor
+  now rejoins the parts so the model translates one coherent paragraph rather than isolated
+  sentence fragments.
 
 ## Project layout
 

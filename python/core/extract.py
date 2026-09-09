@@ -156,6 +156,51 @@ def _looks_caption_start(text):
     return bool(re.match(r"^(fig(ure)?\.?|table|supplementary)\s*[0-9ivxlc]+", t)) or t.startswith("fig.")
 
 
+_TERM_RE = re.compile(r"[.!?;:]$")
+
+
+def _looks_sentence_end(text):
+    """去掉尾部常见引用/编号闭括号后，判断文本是否以句号等结尾。
+
+    覆盖像 `[ 31 ].`、` (c).`、`SC)`… 末尾其实已闭合的正文；也避免把
+    "等等。"之后又跟闭括号误判为未完继续。
+    """
+    t = (text or "").strip()
+    if not t:
+        return True  # 空不合并
+    # 去掉末尾成对的闭括号/可能跟的引用编号
+    m = re.search(r"([.!?;:])[\s]*[\])]*\s*$", t)
+    if m:
+        return True
+    return False
+
+
+def _merge_overflow(units):
+    """把正文中被 栏/页 误切成多片的同段续接起来。
+
+    跨双栏 PDF 的常见病：一个自然段在左栏结尾没画句号就断了（栏末/页末），
+    extract 将其当独立段 → 中句被拆成“各自完整但其实是孤句”令翻译失真。
+    这里以“上一 body 段不以句末标点收尾、且下一项也是 body（非标题）”为判据，
+    把下段并入上一段，把同一个自然段完整接回去。标题永远独立。
+    """
+    out = []
+    for u in units:
+        if not out:
+            out.append(dict(u))
+            continue
+        last = out[-1]
+        if (last.get("kind") == "body" and u.get("kind") == "body"
+                and not _looks_sentence_end(last.get("text"))):
+            # 续接
+            lt = last.get("text") or ""
+            sep = "" if (lt.endswith("-") or lt.endswith("\u2010")) else " "
+            last["text"] = _norm(lt + sep + (u.get("text") or "")).strip()
+            continue
+        out.append(dict(u))
+    # 段尾孤句(整段仍不以句点结束)不改；已是信息最小残留
+    return out
+
+
 def _segment_column(lines, body_median, page, ext):
     """把某栏 lines 切成 {kind,text,level,page} 单元。
 
@@ -374,6 +419,9 @@ def run(cfg):
     os.makedirs(images_dir, exist_ok=True)
 
     paras_out = []
+    # 合并“跨栏/跨页被截断”的同段正文：以一个未以句点结尾的 body 段为信号，
+    # 把紧随的下一个 body 续接进来，修复“也表现出较高水平”这类句中被拆开各自翻译的问题。
+    units = _merge_overflow(units)
     for u in units:
         rec = {"print_page": u["page"], "pdf_page": u["page"], "text": u["text"], "kind": u["kind"]}
         if u.get("level") is not None:
