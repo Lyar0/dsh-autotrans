@@ -44,6 +44,7 @@ DEFAULTS = {
         "temperature": 0.3,
         "domain": "general",          # general | biomedical | anthropology | life-science
         "system_prompt_file": "",      # 可选：自定义系统提示词文件（utf-8）
+        "auto_glossary": True,         # 翻译前自动用 LLM 从本文扫出领域术语表并并入
     },
 
     "render": {

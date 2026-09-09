@@ -122,8 +122,10 @@ python python/autotrans.py translate paper.pdf  # 需要 DEEPSEEK_API_KEY
 python python/autotrans.py render   paper.pdf
 ```
 
-产物在 `<pdf>_translated/`：`extracted.json`、`preview/article.txt`、
-`translated_final.json`，以及渲染出的 `.docx`/`.epub`。
+产物默认写到 `<输出根>/autotrans/<PDF文件名（去扩展名）>/`：DSH 工具使用时输出根为
+调用方的 agent 工作区；独立 CLI 时为 PDF 所在目录。内含 `extracted.json`、
+`preview/article.txt`、`translated_final.json` 及渲染出的 `.docx`/`.epub`。
+可用 `--out-dir` 覆盖。
 
 ## 配置
 
@@ -148,6 +150,18 @@ python python/autotrans.py render   paper.pdf
 
 高级提取/翻译阈值放在 JSON 配置文件里（见 `python/config.example.json`）：提取几何参数、
 批大小、temperature、自定义系统提示词、输出文件名等。
+
+`translation.auto_glossary` 默认开启：翻译前会让模型先扫一遍当前文献，生成一张领域术语表
+`auto_glossary.tsv`，再与你用 `--glossary`/配置选择的术语表合并（同名时以手写表优先）。
+这是「换到全新研究领域也能自动统一译名」的机制；生成文件会缓存，删掉即可重新生成。
+
+### 管线行为说明
+
+- **不再句中硬截断**：超长段落只在**句子边界**处分块（不会把一句话/一个词从中间切断），
+  单句即使超过块大小也整句翻译。
+- **分级标题**：提取会为标题记一个 `level`（按编号/字号启发式：`1 Introduction`→1 级，
+  `2.1 …`→2 级，…）；DOCX 渲染按级别用不同字号+加粗，使章/节/小节在视觉上拉开；
+  EPUB 用 `h2`/`h3` 呈现。
 
 ## 目录结构
 

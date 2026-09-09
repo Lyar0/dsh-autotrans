@@ -19,6 +19,20 @@ import urllib.request
 import urllib.error
 from collections import defaultdict
 
+DEFAULT_GLOSSARY_SYSTEM = """你是术语抽取助手。阅读给定的英文论文/文献选段，识别其中【该领域专业术语、专有名词、关键概念】及其中文规范译名。
+
+要求：
+1. 只输出技术/领域术语（含专有缩写、工具/平台/方法名若中文语境需译出时给出；像 Seurat、Scanpy、MERFISH、10x Genomics 这类保留英文原样的，也列出但中文译名用原文）。基因/蛋白名（如 PD-L1、WNT）无需列出。
+2. 中文译名要准确、常用、统一；同词多译取最通用者。
+3. 每条尽量独立成对：英文术语（可含括号缩写）\t中文译名
+4. 只输出以制表符分隔的两列，每行一对，不要任何解释、编号或额外文字。没有就不输出任何内容。
+5. 数量控制在最有价值的 20~60 条，覆盖全文反复出现且影响整体一致性的术语。"""
+
+
+def _auto_glossary_system():
+    return DEFAULT_GLOSSARY_SYSTEM
+
+
 DEFAULT_SYSTEM = """你是一位专业的{domain}中英译者。请将用户给出的英文段落翻译成地道、专业、忠实、通顺的中文学术中文（科技/学术论文语体，客观严谨）。
 
 翻译要求：
@@ -56,25 +70,45 @@ def _load_glossary(path):
 
 
 def _split_para(text, max_chunk):
+    """按【句子边界】把超长段拆成 ≤ max_chunk 的块，避免在一句话中间硬截断。
+
+    策略：先按句末标点(.!?;)拆成“句子单元”（跨缩写/小数点不完美，但不会切断词/句内部），
+    再贪心组块直到接近 max_chunk。只有极少数“单句就超长”的句子会整体保留（宁可长度超一点，
+    也绝不在句中断成两半分别翻译导致译意割裂）。绝对不做事先按 max_chunk 的中部硬切。
+    """
     if len(text) <= max_chunk:
         return [text]
-    parts = re.split(r"(?<=[.!?;])\s+", text)
-    chunks, cur = [], ""
-    for p in parts:
-        if cur and len(cur) + len(p) + 1 > max_chunk:
+    # 句单元拆分：保留句末标点+空格
+    pieces = re.findall(r"[^.!?;]*[.!?;]+(?:\s+|$)|[^.!?;]+$", text)
+    pieces = [p.strip() for p in pieces if p and p.strip()]
+
+    def push(chunks, cur):
+        cur = cur.strip()
+        if cur:
             chunks.append(cur)
-            cur = p
+        return ""
+
+    chunks, cur = [], ""
+    for piece in pieces:
+        # 保留 split 时去掉的空格，避免粘连
+        sep = " " if cur else ""
+        cand = (cur + sep + piece).strip()
+        if len(cand) <= max_chunk:
+            cur = cand
+            continue
+        # 当前块已满：先冲掉已积累的句子
+        if cur:
+            chunks.append(cur.strip())
+            cur = piece
+            # 若连当前单句仍超长（罕见超长句），整体放入，绝不砍句
+            while len(cur) > max_chunk:
+                chunks.append(cur.strip())
+                cur = ""
         else:
-            cur = (cur + " " + p) if cur else p
-    if cur:
-        chunks.append(cur)
-    final = []
-    for c in chunks:
-        while len(c) > max_chunk:
-            final.append(c[:max_chunk])
-            c = c[max_chunk:]
-        final.append(c)
-    return final
+            cur = piece
+    if cur.strip():
+        chunks.append(cur.strip())
+    return chunks
 
 
 def _atomic_write(path, obj):
@@ -172,11 +206,114 @@ def _load_system(cfg):
     return tpl.replace("{domain}", domain_zh)
 
 
+# ---------------- 自动 / 合并 术语表 ----------------
+
+def _build_doc_sample(data, limit_urls=6000):
+    """拼一段够 LLM 识别领域术语的文档代表文本：标题 + 前部正文片段。"""
+    parts = []
+    seen = set()
+    cap = 0
+    for ch in data.get("chapters", []):
+        for p in ch.get("paragraphs", []):
+            txt = (p.get("text") or "").strip()
+            if not txt:
+                continue
+            if txt in seen:
+                continue
+            seen.add(txt)
+            parts.append(txt)
+            cap += len(txt)
+            if cap >= limit_urls and len(parts) >= 8:
+                break
+        if cap >= limit_urls and len(parts) >= 8:
+            break
+    return "\n".join(parts)
+
+
+def generate_auto_glossary(cfg, api_key, data):
+    """用 LLM 从本文扫出该领域术语表（换域自动适配）。
+
+    返回 (pairs, cache_path)。结果缓存到 out_dir/auto_glossary.tsv，可断点续用：
+    已存在且健在则直接读取不重复调用 API。调用失败则告警并返回空（不影响主流程）。
+    """
+    t = cfg["translation"]
+    out_dir = cfg["out_dir"]
+    cache = os.path.join(out_dir, "auto_glossary.tsv")
+
+    existing = _load_glossary(cache)
+    if existing:
+        print(f"复用自动术语表（{len(existing)} 条）：{cache}")
+        return existing, cache
+
+    if not api_key:
+        return [], cache
+
+    sample = _build_doc_sample(data)
+    if not sample:
+        return [], cache
+    # 剪到约 6000 字符，避免超出上下文
+    sample = sample[:6000]
+
+    system = _auto_glossary_system()
+    user = ("请阅读以下论文内容，抽取该领域专业术语并给出中文规范译名。\n"
+            "严格按 英文术语\\t中文译名 每行一对输出，不要解释或编号：\n\n" + sample)
+
+    try:
+        raw, _ = _call(t["api_base"], api_key, t.get("model", "deepseek-chat"),
+                       system, user, t.get("temperature", 0.0), 4096)
+    except Exception as e:
+        print(f"警告：自动术语表生成失败（{e}），继续用现有个/空白词表。")
+        return [], cache
+
+    pairs = []
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0].strip() and parts[1].strip():
+            pairs.append((parts[0].strip(), parts[1].strip()))
+    # 去重（按英文词，保留首个中文译名）
+    uniq, seen_en = [], set()
+    for en, zh in pairs:
+        if en.lower() in seen_en:
+            continue
+        seen_en.add(en.lower())
+        uniq.append((en, zh))
+
+    if uniq:
+        os.makedirs(out_dir, exist_ok=True)
+        with open(cache, "w", encoding="utf-8") as f:
+            f.write("# 自动生成的领域术语表（可用手写表覆盖/合并；删了会重新生成）\n")
+            for en, zh in uniq:
+                f.write(f"{en}\t{zh}\n")
+        print(f"已生成自动术语表：{len(uniq)} 条 -> {cache}")
+    return uniq, cache
+
+
+def merge_glossaries(manual_pairs, auto_pairs):
+    """自动表在后，不覆盖手写表中同英文词的译名（手写优先级更高）。"""
+    merged = list(manual_pairs)
+    seen_en = set(en.lower() for en, _ in manual_pairs)
+    for en, zh in auto_pairs:
+        if en.lower() not in seen_en:
+            merged.append((en, zh))
+            seen_en.add(en.lower())
+    return merged
+
+
 def run(cfg, api_key):
     t = cfg["translation"]
     out_dir = cfg["out_dir"]
     data = json.load(open(os.path.join(out_dir, "extracted.json"), encoding="utf-8-sig"))
     glossary = _load_glossary(cfg.get("glossary", ""))
+
+    # 自动领域词表（换域即用）：cfg.translation.auto_glossary 默认开。自动表不覆盖手写表同名译名。
+    auto_pairs = []
+    if t.get("auto_glossary", True):
+        auto_pairs, _ = generate_auto_glossary(cfg, api_key, data)
+    glossary = merge_glossaries(glossary, auto_pairs)
+
     gl_block = "\n".join(f"{en}\t{zh}" for en, zh in glossary) if glossary else "（无）"
     system = _load_system(cfg).replace("{glossary_block}", gl_block)
 

@@ -93,18 +93,182 @@ def _is_furniture(line):
 
 def _looks_heading(line, body_median):
     t = line["text"]
-    if not t or len(t) > 90:
+    if not t:
         return False
     if _is_furniture(line):
         return False
-    if t.endswith((".", ";", ",")):
+    if t.strip().endswith((".", ";", ",")):
         return False
-    # 明显大于正文字号（如标题、章标题），或短且像标题
-    if line["size"] >= body_median * 1.12:
+    # 带章节号的长标题即便超过 90 字也判为标题
+    numbered = bool(re.match(r"^\s*\d{1,2}(?:\.\d{1,2}){0,2}\s+[A-Za-z\u4e00-\u9fff]", t))
+    if numbered and len(t) <= 200:
         return True
-    if len(t) <= 60 and not re.search(r"\d{2,}", t) and len(t.split()) <= 12:
+    if len(t) > 90:
+        return False
+    low = _strip_punct_lower(t)
+    # 独立成段的常见大写章节头 / 顶层关键字
+    if low in _TOP_LEVEL_KEYWORDS:
+        return True
+    words = t.split()
+    if words and t.isupper() and 1 <= len(words) <= 12 and not re.search(r"\d{2,}", t):
+        return True
+    # 字号明显大于正文的（章/节/标题），通常是独立短行
+    if line["size"] >= body_median * 1.45:
         return True
     return False
+
+
+def _strip_punct_lower(text):
+    # 去掉末尾的标点/计数修饰后规整为小写，便于与关键字/全大写匹配
+    return text.strip().strip(":.\u2013\u2014-_ ").lower()
+
+
+# 常见顶层章节（映射为 level 0/1 的强关键字），供标题分级参考
+_TOP_LEVEL_KEYWORDS = {
+    "abstract", "introduction", "background", "methods", "materials and methods",
+    "results", "discussion", "conclusions", "conclusion", "references",
+    "acknowledgements", "acknowledgments", "bibliography", "literature cited",
+    "declarations", "supplementary information", "author details",
+    "definitions", "data availability", "funding",
+}
+
+
+def _heading_level(text, size, body_median, ref_size=None):
+    """启发式给一个 heading 文本估层级（0=书名级,1=章,2=节,3=小节）。"""
+    t = text.strip()
+    low = t.lower().rstrip(".:; ")
+    if low in _TOP_LEVEL_KEYWORDS:
+        return 1
+    # 序号结构：1 / 1.2 / 2.3.1 … 点数越多层级越深
+    m = re.match(r"^(\d{1,2})(?:\.(\d{1,2}))?(?:\.(\d{1,2}))?", t)
+    if m:
+        dots = sum(1 for g in m.groups()[1:] if g)
+        return 1 + min(dots, 2)  # "1"→1, "1.2"→2, "1.2.3"→3
+    if t.isupper() or low.startswith(("chapter ", "part ")):
+        return 1
+    # 相对字号：明显放大归 1（章），否则归 2（节）
+    base = ref_size if ref_size and ref_size > 0 else body_median
+    return 1 if size >= base * 1.45 else 2
+
+
+def _looks_caption_start(text):
+    t = text.lower()
+    return bool(re.match(r"^(fig(ure)?\.?|table|supplementary)\s*[0-9ivxlc]+", t)) or t.startswith("fig.")
+
+
+def _segment_column(lines, body_median, page, ext):
+    """把某栏 lines 切成 {kind,text,level,page} 单元。
+
+    采用“行级优先级”识别标题，兼容多种排版：
+      a) 标题独立行（可能带大字）;
+      b) 标题号被拆成一行（'2.1'）紧接着标题词行（'HiST Model Structure'）;
+      c) 章节号+标题+正文被 pymupdf 拆到多行但粘在同一段。
+    流程：先把 lines 按 y 排序；
+      ① 标记“副标题边界轮”：任何位于非正文开头的孤立短数字号行 + 紧随的短标题词行综合判定；
+      ② 用 _group_paragraphs 分粗段，段内再做行级标题切分。
+    """
+    if not lines:
+        return []
+
+    def is_caption(line):
+        return _looks_caption_start(line.get("text", ""))
+
+    def heading_start(line):
+        # 单行判定：带章节号、上层关键字、短全大写、或字号远大于正文
+        return _looks_heading(line, body_median)
+
+    def lone_num(line):
+        return bool(re.match(r"^\s*\d{1,2}(?:\.\d{1,2}){0,2}\s*$", line.get("text", "").strip()))
+
+    def title_word(line):
+        t = line.get("text", "").strip()
+        if not t or len(t) > 160 or t.endswith((".", ";")):
+            return False
+        return _looks_caption_start(t) is False and (
+            _looks_heading(line, body_median) or heading_looks_title(t)
+        )
+
+    raw = sorted(lines, key=lambda l: l["y0"])
+    out = []
+    groups = _group_paragraphs(raw)
+    for para in groups:
+        if ext.get("skip_figure_captions") and is_caption(para[0]):
+            continue
+        # 行级标题收集
+        sub = _extract_heading_lines(para, heading_start, lone_num, title_word, body_median)
+        if sub is None:
+            joined = _para_text(para)
+            if joined:
+                out.append({"kind": "body", "text": joined, "page": page})
+            continue
+        head_lines, rest = sub
+        head_text = _para_text(head_lines)
+        if head_text:
+            lvl = _heading_level(head_text, head_lines[0]["size"], body_median)
+            out.append({"kind": "heading", "level": lvl, "text": head_text, "page": page})
+        if rest:
+            out.extend(_as_body_units(rest, page))
+    return out
+
+
+def heading_looks_title(t):
+    # 用于标题词行补充：不含句点且以大写短词开头的行判标题，降低把“正文续行”当标题的误判
+    words = t.split()
+    if not words or len(words) > 14 or len(t) > 180:
+        return False
+    if not words[0][0].isupper():
+        return False
+    if re.search(r"[.!?]\s*$", t):
+        return False
+    return True
+
+
+def _extract_heading_lines(para, heading_start, lone_num, title_word, body_median):
+    """从一个已分组段落中抽取“标题行前缀”。
+
+    返回 (head_lines, rest_lines) 或 None（本段不含行级标题）。覆盖：
+      - [文头孤立行] 本身即标题（如独立短标题行）
+      - [孤立数字号行][标题词行] 相邻组合（'2.1' + 'HiST Model Structure'）
+      - [孤立数字号行] 后面接很长正文时不算（避免把编号列表当标题）
+    """
+    n = len(para)
+    i = 0
+    # 允许前导孤立数字号行
+    if n and lone_num(para[0]):
+        hdr = [para[0]]
+        i = 1
+        # 若紧跟标题词行，则并入
+        if i < n and title_word(para[i]) and not lone_num(para[i]):
+            hdr.append(para[i]); i += 1
+            # 可能标题词被拆多行（都满足 title_word 且较短）
+            while i < n and title_word(para[i]) and len(para[i]["text"]) <= 100:
+                hdr.append(para[i]); i += 1
+        # 无标题词跟随时：孤立数字可能只是列表项，不判为标题；除非它本身就是带完整标题的一个段（段仅此行）
+        if len(hdr) == 1 and n == 1:
+            return hdr, []
+        if len(hdr) == 1:
+            return None
+        return hdr[:i], para[i:]
+
+    # 无孤立号：若首行即标题
+    if heading_start(para[0]):
+        hdr = [para[0]]
+        j = 1
+        while j < n and title_word(para[j]) and lone_num(para[j]) is False and len(para[j]["text"]) <= 100:
+            hdr.append(para[j]); j += 1
+        return hdr, para[j:]
+    # 首行是普通正文
+    return None
+
+
+def _as_body_units(raw_lines, page):
+    """把非标题行按行距再分组成 body 单元（标题拆开后余文可能跨段）。"""
+    result = []
+    for para in _group_paragraphs(raw_lines):
+        t = _para_text(para)
+        if t:
+            result.append({"kind": "body", "text": t, "page": page})
+    return result
 
 
 def _group_paragraphs(lines):
@@ -195,24 +359,21 @@ def run(cfg):
 
         for col in sorted(set(it["col"] for it in items)):
             col_lines = [it for it in items if it["col"] == col]
-            for para in _group_paragraphs(col_lines):
-                if ext.get("skip_figure_captions") and _is_figure_caption(para[0]):
-                    continue
-                joined = _para_text(para)
-                if not joined:
-                    continue
-                kind = "heading" if (len(para) == 1 and _looks_heading(para[0], body_median)) else "body"
-                units.append({"kind": kind, "text": joined, "page": page1})
+            units.extend(_segment_column(col_lines, body_median, page1, ext))
 
     doc.close()
 
     title = cfg.get("title") or os.path.splitext(os.path.basename(cfg["pdf_path"]))[0]
+    paras_out = []
+    for u in units:
+        rec = {"print_page": u["page"], "pdf_page": u["page"], "text": u["text"], "kind": u["kind"]}
+        if u.get("level") is not None:
+            rec["level"] = u["level"]
+        paras_out.append(rec)
     data = {
         "title": title,
         "author": cfg.get("author", ""),
-        "chapters": [{"title": title, "paragraphs": [
-            {"print_page": u["page"], "pdf_page": u["page"], "text": u["text"], "kind": u["kind"]}
-            for u in units]}],
+        "chapters": [{"title": title, "paragraphs": paras_out}],
         "notes": {"paragraphs": []},
         "meta": {"two_column": bool(two_col), "reference_page": ref_page,
                  "body_median": round(body_median, 2)},
@@ -228,6 +389,9 @@ def run(cfg):
     n_words = sum(len(u["text"].split()) for u in units)
     with open(os.path.join(prev, "article.txt"), "w", encoding="utf-8") as f:
         for u in units:
-            f.write(("[H] " if u["kind"] == "heading" else "") + u["text"] + "\n\n")
+            tag = "body"
+            if u["kind"] == "heading":
+                tag = "H%d" % u.get("level", 2)
+            f.write(f"[{tag}] " + u["text"] + "\n\n")
     print(f"提取完成：{len(units)} 段 / ~{n_words} 词；双栏={two_col}；参考文献起始页={ref_page}")
     return data

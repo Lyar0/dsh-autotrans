@@ -134,8 +134,10 @@ python python/autotrans.py translate paper.pdf  # needs DEEPSEEK_API_KEY
 python python/autotrans.py render   paper.pdf
 ```
 
-Outputs land in `<pdf>_translated/`: `extracted.json`, `preview/article.txt`,
-`translated_final.json`, and the rendered `.docx`/`.epub`.
+Outputs are written under the caller workspace when the DSH tool is used, or
+alongside the PDF for a standalone run, into `<output>/autotrans/<pdf-stem>/`:
+`extracted.json`, `preview/article.txt`, `translated_final.json` and the rendered
+`.docx`/`.epub`. Explicitly pass `--out-dir` to override.
 
 ## Configuration
 
@@ -162,6 +164,22 @@ Or disable the tool:
 Advanced extraction/translation thresholds live in a JSON config file
 (`python/config.example.json`): extract geometry, batch sizes, temperature, custom system
 prompts, and output file names.
+
+`translation.auto_glossary` is on by default: before translating, the model scans the
+document and builds a `auto_glossary.tsv` domain glossary for the current literature,
+then merges it with the one selected via `--glossary` (manual entries win on conflicts).
+This is the mechanism that adapts to a brand-new research field without you hand-writing
+a glossary; the generated file is cached next to the output and can be deleted to
+regenerate.
+
+### Behavior notes on the pipeline
+
+- **No mid-sentence splits**: long paragraphs are chunked **only at sentence
+  boundaries** (never cut inside a sentence/word), so a single sentence is translated
+  whole even if it exceeds the chunk size.
+- **Hierarchical headings**: extraction records a heading `level` (prose/number heuristic:
+  `1 Introduction`, `2.1 …`, `…`); DOCX render uses size-scaled, bold per level so chapter
+  vs section vs subsection are visually distinct. EPUB renders headings as `h2`/`h3`.
 
 ## Project layout
 

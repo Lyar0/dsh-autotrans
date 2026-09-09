@@ -36,6 +36,20 @@ def _ch_title_zh(title, data):
 
 # ---------------- DOCX ----------------
 
+# 各级标题的(加粗, 字号半磅, 是否居中/对齐)。level 语义: 0 书名/顶部, 1 章, 2 节, 3+ 小节。
+_HEADING_STYLE = {
+    0: ("<w:b/><w:sz w:val=\"36\"/>", "center"),   # 书名
+    1: ("<w:b/><w:sz w:val=\"32\"/>", "center"),   # 章
+    2: ("<w:b/><w:sz w:val=\"28\"/>", None),       # 节
+    3: ("<w:b/><w:sz w:val=\"26\"/>", None),       # 小节
+}
+_HEADING_STYLE_LAST = ("<w:b/><w:sz w:val=\"24\"/>", None)
+
+
+def _heading_docx_style(level):
+    return _HEADING_STYLE.get(int(level) if level is not None else 2, _HEADING_STYLE_LAST)
+
+
 def _para_docx(text, style=None, align=None):
     props = f"<w:rPr>{style}</w:rPr>" if style else ""
     jc = f'<w:jc w:val="{align}"/>' if align else ""
@@ -47,7 +61,7 @@ def render_docx(cfg, data):
     paras = data["chapters"][0]["paragraphs"]
     xml_parts = []
     title = data.get("title", "") or "译文"
-    xml_parts.append(_para_docx(title, "<w:b/><w:sz w:val=\"36\"/>", "center"))
+    xml_parts.append(_para_docx(title, _HEADING_STYLE[0][0], _HEADING_STYLE[0][1]))
     if data.get("author"):
         xml_parts.append(_para_docx(data["author"], None, "center"))
     xml_parts.append(_para_docx("（中文翻译 · 由 AutoTrans 自动生成）", "<w:sz w:val=\"18\"/>", "center"))
@@ -62,7 +76,8 @@ def render_docx(cfg, data):
             xml_parts.append(_para_docx(f"[未翻译] {en}"))
             continue
         if p.get("kind") == "heading":
-            xml_parts.append(_para_docx(_ch_title_zh(zh, data), "<w:b/>"))
+            style, align = _heading_docx_style(p.get("level"))
+            xml_parts.append(_para_docx(_ch_title_zh(zh, data), style, align))
         else:
             xml_parts.append(_para_docx(zh))
     if untranslated:
