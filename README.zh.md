@@ -169,6 +169,9 @@ python python/autotrans.py render   paper.pdf
 - **分级标题**：提取会为标题记一个 `level`（按编号/字号启发式：`1 Introduction`→1 级，
   `2.1 …`→2 级，…）；DOCX 渲染按级别用不同字号+加粗，使章/节/小节在视觉上拉开；
   EPUB 用 `h2`/`h3` 呈现。
+- **PDF 图片抽取并回插到 Word**：每页嵌入的图（如方法示意图）会被写入 `<out>/images/`，
+  并在 Word 里该图片对应 PDF 页正文处以适配页宽的比例插入，让图片跟随译文一起走。
+  （EPUB 不插图。）
 
 ## 目录结构
 

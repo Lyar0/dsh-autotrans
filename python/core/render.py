@@ -57,18 +57,100 @@ def _para_docx(text, style=None, align=None):
     return (f'<w:p>{ppr}<w:r>{props}<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>')
 
 
+# —— 图片插入相关常量 ——
+A_NAME = "http://schemas.openxmlformats.org/drawingml/2006/main"
+A_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+A_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+A_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+EMU_PER_PX = 9525  # 1 px ~ 9525 EMU (96 dpi)
+
+
+def _image_para_xml(rel_id, w_emu, h_emu):
+    """构造一张居中、内联图片的 <w:p> XML。"""
+    extent = f'cx="{w_emu}" cy="{h_emu}"'
+    return (
+        '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>'
+        f'<wp:inline distT="0" distB="0" distL="114300" distR="114300" xmlns:wp="{A_WP}" xmlns:a="{A_NAME}">'
+        f'<wp:extent {extent}/>'
+        '<wp:effectExtent l="0" t="0" r="0" b="0"/>'
+        '<wp:docPr id="100" name="Picture 1"/>'
+        f'<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+        f'<a:graphic xmlns:a="{A_NAME}"><a:graphicData uri="{A_PIC}">'
+        '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '<pic:nvPicPr><pic:cNvPr id="0" name="autotrans-figure"/><pic:cNvPicPr/></pic:nvPicPr>'
+        '<pic:blipFill><a:blip r:embed="RID" xmlns:r="RELSURI"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+        '<pic:spPr><a:xfrm><a:off x="0" y="0"/>'
+        f'<a:ext {extent}/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
+        '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+    ).replace('RID', rel_id).replace('RELSURI', A_REL)
+
+
+def _fit_emu(img_w_px, img_h_px, max_w_emu, max_h_emu=None):
+    """把图片像素等比例缩放进 EMU 上限（页宽自适应）。返回 (w,h) EMU。"""
+    w = int(img_w_px) * EMU_PER_PX
+    h = int(img_h_px) * EMU_PER_PX
+    if max_w_emu and w > max_w_emu:
+        h = int(h * max_w_emu / w)
+        w = max_w_emu
+    if max_h_emu and h > max_h_emu:
+        w = int(w * max_h_emu / h)
+        h = max_h_emu
+    return max(int(w), 1), max(int(h), 1)
+
+
 def render_docx(cfg, data):
     paras = data["chapters"][0]["paragraphs"]
-    xml_parts = []
     title = data.get("title", "") or "译文"
-    xml_parts.append(_para_docx(title, _HEADING_STYLE[0][0], _HEADING_STYLE[0][1]))
-    if data.get("author"):
-        xml_parts.append(_para_docx(data["author"], None, "center"))
-    xml_parts.append(_para_docx("（中文翻译 · 由 AutoTrans 自动生成）", "<w:sz w:val=\"18\"/>", "center"))
-    xml_parts.append(_para_docx(""))
 
+    # —— 读入待插图（按 pdf 页码标记）——
+    media = []  # 顺序字段: rel, fpath, ext
+    used_imgs = []
+    for im in data.get("images", []) or []:
+        rel = (im.get("rel") or f"images/{im.get('file') or ''}").replace("\\", "/")
+        fpath = os.path.join(cfg["out_dir"], *rel.split("/"))
+        if not os.path.exists(fpath):
+            continue
+        ext = os.path.splitext(fpath)[1].lstrip(".").lower() or "png"
+        if ext not in ("png", "jpeg", "jpg", "gif", "bmp"):
+            ext = "png"
+        used_imgs.append({"page": int(im.get("page") or 1), "rel": rel,
+                          "fpath": fpath, "ext": ext,
+                          "w": int(im.get("w") or 0), "h": int(im.get("h") or 0)})
+    used_imgs.sort(key=lambda x: (x["page"], x["rel"]))
+
+    # rel id 分配（媒体从 rId2 起，rId1 留 styles）
+    for i, u in enumerate(used_imgs, start=2):
+        u["rel_id"] = f"rId{i}"
+        u["w_emu"], u["h_emu"] = _fit_emu(u["w"], u["h"], max_w_emu=int(5.5 * 914400))
+
+    # —— 组正文 ——
+    xml_parts = []
+    tail_imgs = list(reversed(used_imgs))
+    media_files = []  # (rel, fpath, ext, rel_id)
     untranslated = 0
+
+    def queue_media(u):
+        media_files.append((u["rel"], u["fpath"], u["ext"], u["rel_id"]))
+
+    def emit_title():
+        xml_parts.append(_para_docx(title, _HEADING_STYLE[0][0], _HEADING_STYLE[0][1]))
+        if data.get("author"):
+            xml_parts.append(_para_docx(data["author"], None, "center"))
+        xml_parts.append(_para_docx("（中文翻译 · 由 AutoTrans 自动生成）", "<w:sz w:val=\"18\"/>", "center"))
+        xml_parts.append(_para_docx(""))
+
+    def flush_before(page):
+        while tail_imgs and tail_imgs[-1]["page"] <= int(page):
+            u = tail_imgs.pop()
+            queue_media(u)
+            xml_parts.append(_image_para_xml(u["rel_id"], u["w_emu"], u["h_emu"]))
+            xml_parts.append(_para_docx(""))
+
+    emit_title()
     for p in paras:
+        pg = int(p.get("print_page") or p.get("pdf_page") or 1)
+        flush_before(pg)
         zh = (p.get("zh") or "").strip()
         en = (p.get("text") or "").strip()
         if not zh:
@@ -80,6 +162,12 @@ def render_docx(cfg, data):
             xml_parts.append(_para_docx(_ch_title_zh(zh, data), style, align))
         else:
             xml_parts.append(_para_docx(zh))
+    # 剩余图（末段 page 之前都跑不到）置尾
+    while tail_imgs:
+        u = tail_imgs.pop()
+        queue_media(u)
+        xml_parts.append(_image_para_xml(u["rel_id"], u["w_emu"], u["h_emu"]))
+        xml_parts.append(_para_docx(""))
     if untranslated:
         print(f"警告：{untranslated} 段未翻译，已回退英文原文。")
 
@@ -91,21 +179,40 @@ def render_docx(cfg, data):
               '<w:docDefaults><w:rPrDefault><w:rPr>'
               '<w:rFonts w:ascii="Times New Roman" w:eastAsia="宋体" w:hAnsi="Times New Roman"/>'
               '<w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>') % W
+
+    # —— content types (含媒体) ——
+    default_ct = {
+        "rels": "application/vnd.openxmlformats-package.relationships+xml",
+        "xml": "application/xml",
+        "png": "image/png", "jpeg": "image/jpeg", "jpg": "image/jpeg",
+        "gif": "image/gif", "bmp": "image/bmp",
+    }
+    _media_ext = sorted({m[2] for m in media_files}) or ["png"]
+    ct_parts = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+                '<Default Extension="xml" ContentType="application/xml"/>']
+    for e in sorted(_media_ext):
+        ct_parts.append(f'<Default Extension="{e}" ContentType="{default_ct.get(e, "application/octet-stream")}"/>')
+    ct_parts.append('<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>')
+    ct_parts.append('<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>')
     content_types = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
                      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-                     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-                     '<Default Extension="xml" ContentType="application/xml"/>'
-                     '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-                     '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
-                     '</Types>')
+                     + "".join(ct_parts) + '</Types>')
+
     rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
             '</Relationships>')
+    rel_part = ['<Relationship Id="rId1" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+                'Target="styles.xml"/>']
+    for i, m in enumerate(media_files, start=2):
+        _, _, _, rid = m
+        # target 写成 media/name（basename 即可）
+        base = os.path.basename(m[1])
+        rel_part.append(f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/{base}"/>')
     doc_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-                '</Relationships>')
+                + "".join(rel_part) + '</Relationships>')
 
     name = cfg["render"].get("docx_name") or (re.sub(r'[\\/:*?"<>|]+', "_", title) + "_中文翻译.docx")
     out = os.path.join(cfg["out_dir"], name)
@@ -115,7 +222,10 @@ def render_docx(cfg, data):
         z.writestr("word/document.xml", docxml)
         z.writestr("word/_rels/document.xml.rels", doc_rels)
         z.writestr("word/styles.xml", styles)
-    print("DOCX ->", out)
+        for i, m in enumerate(media_files, start=1):
+            rel_media, fpath_media, ext_media, _ = m
+            z.write(fpath_media, f"word/media/{os.path.basename(fpath_media)}")
+    print("DOCX ->", out, f"(含 {len(media_files)} 图)")
     return out
 
 

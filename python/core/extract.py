@@ -361,9 +361,18 @@ def run(cfg):
             col_lines = [it for it in items if it["col"] == col]
             units.extend(_segment_column(col_lines, body_median, page1, ext))
 
+    # ---- 收集并落盘页面大图（供 Word 插图）；需在 doc 关闭前完成 ----
+    images_dir = os.path.join(cfg["out_dir"], "images")
+    os.makedirs(images_dir, exist_ok=True)
+    image_list = []
+    for entry in _harvest_page_images(doc, images_dir, body_top, body_bottom, last_page, config=ext):
+        image_list.append(entry)
+
     doc.close()
 
     title = cfg.get("title") or os.path.splitext(os.path.basename(cfg["pdf_path"]))[0]
+    os.makedirs(images_dir, exist_ok=True)
+
     paras_out = []
     for u in units:
         rec = {"print_page": u["page"], "pdf_page": u["page"], "text": u["text"], "kind": u["kind"]}
@@ -374,14 +383,11 @@ def run(cfg):
         "title": title,
         "author": cfg.get("author", ""),
         "chapters": [{"title": title, "paragraphs": paras_out}],
+        "images": image_list,
         "notes": {"paragraphs": []},
         "meta": {"two_column": bool(two_col), "reference_page": ref_page,
                  "body_median": round(body_median, 2)},
     }
-
-    os.makedirs(cfg["out_dir"], exist_ok=True)
-    with open(os.path.join(cfg["out_dir"], "extracted.json"), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
 
     # preview
     prev = os.path.join(cfg["out_dir"], "preview")
@@ -393,5 +399,71 @@ def run(cfg):
             if u["kind"] == "heading":
                 tag = "H%d" % u.get("level", 2)
             f.write(f"[{tag}] " + u["text"] + "\n\n")
-    print(f"提取完成：{len(units)} 段 / ~{n_words} 词；双栏={two_col}；参考文献起始页={ref_page}")
+
+    with open(os.path.join(cfg["out_dir"], "extracted.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+
+    print(f"提取完成：{len(units)} 段 / ~{n_words} 词；图片={len(image_list)}；双栏={two_col}；参考文献起始页={ref_page}")
     return data
+
+
+def _harvest_page_images(doc, images_dir, body_top, body_bottom, last_page, config=None, max_per_page=6, min_px=40000):
+    """逐页收集并落盘“版面大图”（去除 logo/小图标），返回 [{page,file,w,h}]。
+
+    只认矩形位于正文上/中区、面积够大的直接图片；同一 xref 去重（一页可能放多个同 xref）。
+    图片写入 out_dir/images/page_NN_idx.ext，供 DOCX 插图阶段引用。
+    """
+    out = []
+    done = set()  # (page) 本函数产出以页+顺序即够；xref 去重按 (page,xref)
+    seen_xref = set()
+    for pno in range(min(last_page or doc.page_count, doc.page_count or 0)):
+        page = doc[pno]
+        pn = pno + 1
+        imgs = page.get_images(full=True)
+        if not imgs:
+            continue
+        placed = []
+        for item in imgs:
+            try:
+                xref = item[0]
+                rects = page.get_image_rects(xref)
+            except Exception:
+                continue
+            if not rects:
+                continue
+            info = doc.extract_image(xref)
+            if not info:
+                continue
+            w, h = info.get("width", 0), info.get("height", 0)
+            ext = (info.get("ext") or "png").lower()
+            # SKIP icon-like (small)
+            if w * h < min_px:
+                continue
+            for r in rects:
+                rw, rh = r.width, r.height
+                # 要求矩形落在正文纵向带且非极小（图标徽标之类）
+                if rw <= 20 and rh <= 20:
+                    continue
+                placed.append((xref, w, h, ext, r))
+        # 过滤多余同 xref
+        picked, px = [], []
+        for entry in placed:
+            xref, w, h, ext, r = entry
+            if (pn, xref) in seen_xref:
+                continue
+            seen_xref.add((pn, xref))
+            picked.append(entry)
+        if not picked:
+            continue
+        for idx, (xref, w, h, ext, r) in enumerate(picked[:max_per_page]):
+            img = doc.extract_image(xref)
+            fname = f"page_{pn:02d}_{idx}.{ext}"
+            fpath = os.path.join(images_dir, fname)
+            with open(fpath, "wb") as fd:
+                fd.write(img["image"])
+            out.append({"page": pn, "file": fname,
+                        "rel": os.path.join("images", fname).replace("\\", "/"),
+                        "w": w, "h": h})
+        if len(picked) > max_per_page:
+            print(f"  警告：第 {pn} 页图片过多，仅收集前 {max_per_page} 张")
+    return out

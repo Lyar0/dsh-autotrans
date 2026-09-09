@@ -190,6 +190,10 @@ file lives outside the plugin's own folder, so a plugin reinstall does not erase
 - **Hierarchical headings**: extraction records a heading `level` (prose/number heuristic:
   `1 Introduction`, `2.1 …`, `…`); DOCX render uses size-scaled, bold per level so chapter
   vs section vs subsection are visually distinct. EPUB renders headings as `h2`/`h3`.
+- **Figures from the PDF are extracted and re-embedded in the Word output**: each page's
+  embedded image (e.g. a methods figure) is written to `<out>/images/` and inserted into the
+  DOCX where its PDF page begins, scaled to fit the page width, so the figures travel with the
+  translation. (Figures are kept out of the EPUB.)
 
 ## Project layout
 
