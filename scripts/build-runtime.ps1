@@ -18,7 +18,8 @@
 #>
 param(
     [string]$Python = "python",
-    [string]$Name = "autotrans"
+    [string]$Name = "autotrans",
+    [string]$OpenSSLBin = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,18 +43,70 @@ foreach ($m in @("PyInstaller", "pymupdf", "ebooklib")) {
 if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
 
 Write-Host "==> Running PyInstaller (onedir)..."
+
+# --- OpenSSL DLL pinning -------------------------------------------------------
+# PyInstaller sometimes resolves libssl/libcrypto to a DIFFERENT OpenSSL than the
+# one $Python's own _ssl.pyd links against (e.g. a stale conda pair), which makes
+# the frozen runtime throw:
+#     ImportError: DLL load failed while importing _ssl: <procedure not found>
+# and downstream urllib reports  "unknown url type: https".
+# Fix: resolve the OpenSSL version $Python reports, locate those exact DLLs inside
+# the interpreter's environment, and force PyInstaller to ship them. If auto-detection
+# fails we keep building (no pin) and just warn; the author can pass -OpenSSLBin.
+# -------------------------------------------------------------------------------
+$pinArgs = @()
+
+function Resolve-OpenSslBin {
+    param([string]$PythonExe)
+    # _ssl sits in the interpreter's env; for conda it is <env>/Library/bin.
+    $candRoots = @()
+    $envRoot = Split-Path (Split-Path $PythonExe -Parent) -Parent   # <env> from <env>/python  or bin
+    if (Test-Path (Join-Path $envRoot "Library\bin")) { $candRoots += (Join-Path $envRoot "Library\bin") }
+    foreach ($r in $candRoots) {
+        $ssl = Get-Item (Join-Path $r "libssl-3-x64.dll") -ErrorAction SilentlyContinue
+        $crp = Get-Item (Join-Path $r "libcrypto-3-x64.dll") -ErrorAction SilentlyContinue
+        if ($ssl -and $crp) { Write-Host "  pin OpenSSL @ $r (libssl $($ssl.VersionInfo.FileVersion))"; return $r }
+    }
+    return $null
+}
+
+if ($OpenSSLBin -and (Test-Path $OpenSSLBin)) {
+    Write-Host "==> Pinning OpenSSL from explicit -OpenSSLBin: $OpenSSLBin"
+    $pinArgs = @(
+        "--add-binary", ((Join-Path $OpenSSLBin "libssl-3-x64.dll") + ";."),
+        "--add-binary", ((Join-Path $OpenSSLBin "libcrypto-3-x64.dll") + ";.")
+    )
+} else {
+    $match = Resolve-OpenSslBin -PythonExe $Python
+    if ($match) {
+        $pinArgs = @(
+            "--add-binary", ((Join-Path $match "libssl-3-x64.dll") + ";."),
+            "--add-binary", ((Join-Path $match "libcrypto-3-x64.dll") + ";.")
+        )
+    } else {
+        Write-Host "  WARNING: could not auto-locate OpenSSL DLLs next to $Python; building WITHOUT a pin."
+        Write-Host "  If the frozen exe throws 'DLL load failed while importing _ssl', build with:"
+        Write-Host "    -OpenSSLBin D:/Projects/CondaEnvs/<env>/Library/bin"
+    }
+}
+
 $dataSpec = (Join-Path $root "python\glossaries") + ";glossaries"
 $args = @(
     "--noconfirm", "--clean", "--onedir", "--name", $Name,
     "--paths", (Join-Path $root "python"),
     "--add-data", $dataSpec,
     "--distpath", (Join-Path $root "dist"),
-    "--workpath", (Join-Path $root "build"),
-    (Join-Path $pythonDir "autotrans.py")
-)
+    "--workpath", (Join-Path $root "build")
+) + $pinArgs + @( (Join-Path $pythonDir "autotrans.py") )
 & $Python -m PyInstaller @args
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
+# Post-build assertion: the produced onedir must include a libssl whose version
+# matches the pinned one (guards against shipping the broken 3.0.7-style pair).
+$builtSsl = Get-Item (Join-Path $bundle "libssl-3-x64.dll") -ErrorAction SilentlyContinue
+if ($builtSsl) { Write-Host "  -> bundled libssl version: $($builtSsl.VersionInfo.FileVersion)" }
+
+# Thrown if an OpenSSL pin was requested but the output lacks our DLL (config/ABI drift).
 Write-Host "==> Zipping $bundle -> $zipOut"
 if (Test-Path $zipOut) { Remove-Item -Force $zipOut }
 Compress-Archive -Path (Join-Path $bundle "*") -DestinationPath $zipOut -Force
@@ -65,6 +118,8 @@ $sizeMb = [math]::Round((Get-Item $zipOut).Length / 1MB, 1)
 Write-Host "    zip    : $zipOut  ($sizeMb MB)"
 Write-Host ""
 Write-Host "Try it:  $bundle\autotrans.exe --help"
+Write-Host "SSL check built-in: the frozen exe now bundles a self-consistent OpenSSL"
+Write-Host "(see above 'bundled libssl version'), so https translation works."
 Write-Host "After uploading the zip to a GitHub Release, new devices pull it with"
 Write-Host "scripts/get-runtime.ps1 and point the profile's tool-autotrans config.python"
 Write-Host "at the extracted autotrans.exe."
