@@ -201,6 +201,9 @@ file lives outside the plugin's own folder, so a plugin reinstall does not erase
   in one PDF column/page continues into the next without a sentence terminator, the extractor
   now rejoins the parts so the model translates one coherent paragraph rather than isolated
   sentence fragments.
+- **Short, Word-safe output filenames**: rendered DOCX/EPUB basenames are truncated to a
+  reasonable length, so very long source titles never produce a file that Word cannot open or
+  that is awkward to rename. (Set `docx_name`/`epub_name` in config to override the default.)
 
 ## Project layout
 

@@ -26,6 +26,16 @@ def _heading_zh_map(data):
     }
 
 
+def _safe_basename(title, suffix, ext, limit=60):
+    """生成安全、短而可辨的渲染文件名（避免超长中文/路径导致 Word 打不开）。
+
+    去掉非法字符后截取 base ≈ limit 字符，再拼 后缀+扩展名。
+    """
+    base = re.sub(r'[\\/:*?"<>|\u0000-\u001f]+', "_", str(title or "").strip())
+    base = base.strip("._ ") or "译文"
+    return (base[:limit].rstrip().rstrip("._ ") + suffix + ext)
+
+
 def _ch_title_zh(title, data):
     low = title.strip().lower()
     m = _heading_zh_map(data)
@@ -214,7 +224,7 @@ def render_docx(cfg, data):
                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                 + "".join(rel_part) + '</Relationships>')
 
-    name = cfg["render"].get("docx_name") or (re.sub(r'[\\/:*?"<>|]+', "_", title) + "_中文翻译.docx")
+    name = cfg["render"].get("docx_name") or _safe_basename(title, "_中文翻译", ".docx")
     out = os.path.join(cfg["out_dir"], name)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", content_types)
@@ -294,7 +304,7 @@ def render_epub(cfg, data):
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
 
-    name = cfg["render"].get("epub_name") or (re.sub(r'[\\/:*?"<>|]+', "_", title) + "_中文版.epub")
+    name = cfg["render"].get("epub_name") or _safe_basename(title, "_中文版", ".epub")
     out = os.path.join(cfg["out_dir"], name)
     epub.write_epub(out, book, {})
     print("EPUB ->", out)
