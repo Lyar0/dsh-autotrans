@@ -109,7 +109,9 @@ profile 重启后，智能体即拥有 `autotrans` 工具。让它翻译一个 P
 | `config_path` | 高级选项的 JSON 配置文件路径。 |
 
 在 DSH 运行环境中一次性设置 API Key（`DEEPSEEK_API_KEY=sk-...`），或每次调用通过
-`api_key` 传入。
+`api_key` 传入。两者都没有时，插件会自动从 DSH 自身的凭据文件
+（`$DSH_HOME/.credentials.yaml`）读取 DEEPSEEK_API_KEY 复用，无需你再粘贴、不产生
+额外明副本，也不进入会话日志。
 
 ## 独立 CLI
 

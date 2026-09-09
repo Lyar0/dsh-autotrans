@@ -121,7 +121,10 @@ The tool accepts:
 | `config_path` | A JSON config file for advanced options. |
 
 Set the API key once in the environment where DSH runs (`DEEPSEEK_API_KEY=sk-...`), or
-pass it per call via `api_key`.
+pass it per call via `api_key`. If neither is set, the plugin automatically reads the key
+from DSH's own credentials file (`$DSH_HOME/.credentials.yaml`), so a key DSH already
+stores is reused with no further pasting, no duplicate plaintext copy, and it stays out of
+conversation logs.
 
 ## Standalone CLI
 
