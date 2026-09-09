@@ -25,6 +25,7 @@
   },
   "render": {
     "format": "docx",
+    "mode": "cn",
     "docx_name": "",
     "epub_name": ""
   }

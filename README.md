@@ -117,6 +117,7 @@ The tool accepts:
 | `model` | DeepSeek model (default `deepseek-chat`). |
 | `concurrency` | Concurrent requests (default 4). |
 | `format` | `docx` / `epub` / `both`. |
+| `mode` | `cn` (default, Chinese only) or `bilingual` (one English paragraph then its Chinese translation, interleaved). |
 | `api_key` | DeepSeek API key (otherwise `DEEPSEEK_API_KEY` env var). |
 | `config_path` | A JSON config file for advanced options. |
 
@@ -166,7 +167,17 @@ Or disable the tool:
 
 Advanced extraction/translation thresholds live in a JSON config file
 (`python/config.example.json`): extract geometry, batch sizes, temperature, custom system
-prompts, and output file names.
+prompts, output file names, and `render.mode`.
+
+### Chinese-only vs bilingual render
+
+By default the document is rendered **Chinese-only** (`render.mode: cn`). Set `mode` to
+`bilingual` to lay out each paragraph as one **English paragraph immediately followed by
+its Chinese translation**, so the two languages alternate block by block for easy
+side-by-side proofreading. Influence it via the tool call (`--mode bilingual`), the
+rendered JSON config (`render.mode`), or the agent-visible `mode` argument. Bilingual
+files are named `…_中英对照.docx` / `…_中英对照.epub`; the interplay keeps figures at
+their page position in both modes.
 
 `translation.auto_glossary` is on by default: before translating, the model scans the
 document and builds a `auto_glossary.tsv` domain glossary for the current literature,

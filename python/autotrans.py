@@ -72,6 +72,8 @@ def build_parser():
     p.add_argument("--model", help="DeepSeek 模型（默认 deepseek-chat）")
     p.add_argument("--concurrency", type=int, help="并发请求数（默认 4）")
     p.add_argument("--format", choices=["docx", "epub", "both"], help="输出格式（默认 docx）")
+    p.add_argument("--mode", choices=["cn", "bilingual"], default=None,
+                   help="渲染模式：cn（仅中文，默认）；bilingual=中英对照（一段英文一段中文）")
     p.add_argument("--api-base", dest="api_base", help="API 基地址（默认 https://api.deepseek.com）")
     p.add_argument("--api-key", dest="api_key", help="DeepSeek API Key（默认读 DEEPSEEK_API_KEY 环境变量）")
     p.add_argument("--domain", help="翻译领域（general/biomedical/anthropology/life-science）")
@@ -104,6 +106,8 @@ def _apply_overrides(cfg, args):
         cfg["translation"]["concurrency"] = args.concurrency
     if args.format:
         cfg["render"]["format"] = args.format
+    if args.mode:
+        cfg["render"]["mode"] = args.mode
     if args.api_base:
         cfg["translation"]["api_base"] = args.api_base
     if args.domain:

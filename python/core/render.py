@@ -109,6 +109,43 @@ def _fit_emu(img_w_px, img_h_px, max_w_emu, max_h_emu=None):
     return max(int(w), 1), max(int(h), 1)
 
 
+def _bilingual_enabled(cfg):
+    return str(cfg.get("render", {}).get("mode", "cn")).lower() in ("bilingual", "en-zh", "en_zh", "enzh")
+
+
+def _content_specs(p, bilingual):
+    """把一个段落(有 en + zh)切成需要渲染的内容条目列表。
+
+    纯中文(bilingual=False)：每段只输出一行（zh 译文，若无则回退英文并标记）。
+    对照(bilingual=True)：每段先英文原文、再中文译文 —— 最终一段英文一段中文交替。
+    返回 list[dict:{text, kind, level, lang?, untranslated}]
+    """
+    zh = (p.get("zh") or "").strip()
+    en = (p.get("text") or "").strip()
+    kind = p.get("kind", "body")
+    level = p.get("level")
+
+    def zh_body(t, heading=False):
+        return {"text": t, "kind": ("heading" if heading else "body"), "level": level,
+                "untranslated": False}
+
+    if not bilingual:
+        if zh:
+            return [zh_body(zh, heading=(kind == "heading"))]
+        if en:
+            return [{"text": en, "kind": kind, "level": level, "untranslated": True}]
+        return []
+
+    out = []
+    if en:
+        out.append({"text": en, "kind": kind, "level": level, "untranslated": False, "lang": "en"})
+    if zh:
+        out.append(zh_body(zh, heading=(kind == "heading")))
+    elif en:
+        out.append({"text": en, "kind": kind, "level": level, "untranslated": True})
+    return out
+
+
 def render_docx(cfg, data):
     paras = data["chapters"][0]["paragraphs"]
     title = data.get("title", "") or "译文"
@@ -158,20 +195,44 @@ def render_docx(cfg, data):
             xml_parts.append(_para_docx(""))
 
     emit_title()
+    bilingual = _bilingual_enabled(cfg)
+
+    def append_spec(spec_):
+        """把一个 content spec 渲染成 docx 行。返回 False 若空。"""
+        text = (spec_.get("text") or "").strip()
+        if not text:
+            return True  # 空行忽略
+        is_head = spec_.get("kind") == "heading"
+        if spec_.get("lang") == "en":
+            # 对照模式：英文原文当正文输出（标题也先出英文文本再中文标题）
+            if is_head:
+                style, align = _heading_docx_style(spec_.get("level"))
+                xml_parts.append(_para_docx(text, style, align))
+            else:
+                # 英文正文：稍小、斜体弱化以区分中文——但保持可读正常体
+                xml_parts.append(_para_docx(text, "<w:sz w:val=\"21\"/>", None))
+            return True
+        # 中文/译文
+        if spec_.get("untranslated"):
+            xml_parts.append(_para_docx("[未翻译] " + text, "<w:i/>", None))
+            return True
+        if is_head:
+            style, align = _heading_docx_style(spec_.get("level"))
+            xml_parts.append(_para_docx(_ch_title_zh(text, data), style, align))
+        else:
+            xml_parts.append(_para_docx(text))
+        return True
+
     for p in paras:
         pg = int(p.get("print_page") or p.get("pdf_page") or 1)
         flush_before(pg)
-        zh = (p.get("zh") or "").strip()
-        en = (p.get("text") or "").strip()
-        if not zh:
+        specs = _content_specs(p, bilingual)
+        # 判定是否“本段译文缺失”以统计
+        if not (p.get("zh") or "").strip():
             untranslated += 1
-            xml_parts.append(_para_docx(f"[未翻译] {en}"))
-            continue
-        if p.get("kind") == "heading":
-            style, align = _heading_docx_style(p.get("level"))
-            xml_parts.append(_para_docx(_ch_title_zh(zh, data), style, align))
-        else:
-            xml_parts.append(_para_docx(zh))
+        for s in specs:
+            append_spec(s)
+
     # 剩余图（末段 page 之前都跑不到）置尾
     while tail_imgs:
         u = tail_imgs.pop()
@@ -224,7 +285,8 @@ def render_docx(cfg, data):
                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                 + "".join(rel_part) + '</Relationships>')
 
-    name = cfg["render"].get("docx_name") or _safe_basename(title, "_中文翻译", ".docx")
+    suffix = "_中英对照" if _bilingual_enabled(cfg) else "_中文翻译"
+    name = cfg["render"].get("docx_name") or _safe_basename(title, suffix, ".docx")
     out = os.path.join(cfg["out_dir"], name)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", content_types)
@@ -248,6 +310,9 @@ h1.book { text-align:center; font-size:1.7em; margin:2em 0 0.5em; }
 h2.chapter { text-align:center; font-size:1.4em; margin:1.5em 0 1em; }
 h3.section { font-size:1.1em; margin:1.1em 0 0.5em; }
 p { text-indent:2em; margin:0.6em 0; text-align:justify; }
+p.en { font-family: Georgia,"Times New Roman",serif; color:#333;
+       text-indent:0; font-size:0.95em; margin:0.9em 0 0.2em; }
+p.fallback { color:#a00; }
 """
 
 
@@ -282,14 +347,26 @@ def render_epub(cfg, data):
     spine.append(cover)
     toc.append(epub.Link("cover.xhtml", "书名页", "cover"))
 
+    bilingual = _bilingual_enabled(cfg)
     for ci, ch in enumerate(data["chapters"]):
         ctitle = ch["title"]
         parts = [f'<h2 class="chapter">{html.escape(ctitle)}</h2>']
         for p in ch["paragraphs"]:
-            text = (p.get("zh") or p.get("text") or "")
-            tag = "h3" if p.get("kind") == "heading" else "p"
-            cls = ' class="section"' if tag == "h3" else ""
-            parts.append(f'<{tag}{cls}>{html.escape(text)}</{tag}>')
+            for spec in _content_specs(p, bilingual):
+                text = (spec.get("text") or "").strip()
+                if not text:
+                    continue
+                if spec.get("lang") == "en":
+                    tag = "h3" if spec.get("kind") == "heading" else "p.en"
+                    cls = ' class="section"' if tag == "h3" else ' class="en"'
+                    parts.append(f'<{tag}{cls}>{html.escape(text)}</{tag}>')
+                    continue
+                if spec.get("untranslated"):
+                    parts.append(f'<p class="en fallback">[未翻译] {html.escape(text)}</p>')
+                    continue
+                tag = "h3" if spec.get("kind") == "heading" else "p"
+                cls = ' class="section"' if tag == "h3" else ""
+                parts.append(f'<{tag}{cls}>{html.escape(text)}</{tag}>')
         body = "\n".join(parts)
         item = epub.EpubHtml(title=ctitle, file_name=f"ch{ci:02d}.xhtml", lang="zh-CN")
         item.content = (f'<html><head><link rel="stylesheet" href="style.css"/></head>'
@@ -304,7 +381,8 @@ def render_epub(cfg, data):
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
 
-    name = cfg["render"].get("epub_name") or _safe_basename(title, "_中文版", ".epub")
+    name = cfg["render"].get("epub_name") or _safe_basename(
+        title, "_中英对照" if _bilingual_enabled(cfg) else "_中文版", ".epub")
     out = os.path.join(cfg["out_dir"], name)
     epub.write_epub(out, book, {})
     print("EPUB ->", out)
