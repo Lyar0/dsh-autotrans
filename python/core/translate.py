@@ -302,16 +302,63 @@ def merge_glossaries(manual_pairs, auto_pairs):
     return merged
 
 
+def _persist_user_glossary_pairs(pairs, path):
+    """把【新增、不冲突】的词对持久化进用户词表库（append-only，会跨次累积）。
+
+    规则：只新增英文键尚不存在于库中的词对；不覆盖已存在的任何译名。
+    返回本轮实际新增的英文键集合（供打日志）。原子写法防中断。
+    """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        existing = {en.lower(): zh for en, zh in _load_glossary(path)}
+        with open(path, "a", encoding="utf-8") as f:
+            added = []
+            for en, zh in pairs:
+                if en.lower() not in existing:
+                    f.write(f"{en}\t{zh}\n")
+                    existing[en.lower()] = zh
+                    added.append(en)
+            f.flush()
+        return added
+    except Exception as e:
+        print(f"警告：持久化用户词表失败（{e}）")
+        return []
+
+
+def load_user_glossary():
+    """读取持久用户词表库（若已存在），供并入每次翻译。"""
+    try:
+        from core.config import user_glossary_path
+        path = user_glossary_path()
+        pairs = _load_glossary(path)
+        return pairs, path
+    except Exception:
+        return [], ""
+
+
 def run(cfg, api_key):
     t = cfg["translation"]
     out_dir = cfg["out_dir"]
     data = json.load(open(os.path.join(out_dir, "extracted.json"), encoding="utf-8-sig"))
-    glossary = _load_glossary(cfg.get("glossary", ""))
 
-    # 自动领域词表（换域即用）：cfg.translation.auto_glossary 默认开。自动表不覆盖手写表同名译名。
+    # 词表来源层级（前高后低 + 只增不改）：
+    #   1) 显式 glossary(cfg)：内置/手动最高
+    #   2) 持久用户词表库 user_glossary.tsv：地方累计的译名/审定，次高
+    #   3) 本轮自动领域词表 auto_glossary.tsv：最低，仅填补空缺
+    glossary = _load_glossary(cfg.get("glossary", ""))
+    user_lib, user_lib_path = load_user_glossary()
+    if user_lib:
+        glossary = merge_glossaries(glossary, user_lib)
+
+    # 自动领域词表（换域即用）；并存进用户词表库供跨次累积
     auto_pairs = []
     if t.get("auto_glossary", True):
-        auto_pairs, _ = generate_auto_glossary(cfg, api_key, data)
+        auto_generated, _ = generate_auto_glossary(cfg, api_key, data)
+        auto_pairs = auto_generated
+        if auto_generated and user_lib_path:
+            newly = _persist_user_glossary_pairs(auto_generated, user_lib_path)
+            if newly:
+                print(f"已将 {len(newly)} 个新词并入用户词表库（累计可复用）: {user_lib_path}")
     glossary = merge_glossaries(glossary, auto_pairs)
 
     gl_block = "\n".join(f"{en}\t{zh}" for en, zh in glossary) if glossary else "（无）"

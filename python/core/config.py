@@ -16,6 +16,27 @@ def base_dir():
 
 HERE = base_dir()
 
+
+def user_glossary_path():
+    """持久“用户词表库”位置（跨文档累积、跨使用不断变厚）。
+
+    优先级：
+      1) 环境变量 AUTOTRANS_USER_GLOSSARY（由插件传入，避免各自猜测）
+      2) $DSH_HOME 或 ~/.dsh 下的 autotrans/user_glossary.tsv
+    这个文件存放用户自行编辑的译名 + 每次自动生成并入度高的词对；会被并入后续所有翻译。
+    """
+    env = os.environ.get("AUTOTRANS_USER_GLOSSARY", "").strip()
+    if env:
+        return os.path.abspath(env)
+    dsh_home = os.environ.get("DSH_HOME", "").strip()
+    if not dsh_home:
+        dsh_home = os.path.join(os.path.expanduser("~"), ".dsh")
+    return os.path.join(dsh_home, "autotrans", "user_glossary.tsv")
+
+
+def user_glossary_exists():
+    return os.path.exists(user_glossary_path())
+
 DEFAULTS = {
     "pdf_path": "",
     "out_dir": "",                    # 留空则自动 <pdf>_translated/

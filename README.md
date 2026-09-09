@@ -172,6 +172,16 @@ This is the mechanism that adapts to a brand-new research field without you hand
 a glossary; the generated file is cached next to the output and can be deleted to
 regenerate.
 
+**Local term library that grows with use.** Validated/auto word pairs also accumulate
+into a persistent per-user glossary at `$DSH_HOME/autotrans/user_glossary.tsv`
+(`DSH_HOME` defaults to `~/.dsh` for standalone runs). Every new/auto book term is
+appended only once and entries there are merged into **all subsequent** translations;
+an entry already present is never overwritten by a later auto term. The result: the
+longer you use the tool, the fuller and more consistent your local terminology
+becomes, including across research fields. You can also hand-edit this TSV
+(`English<TAB>Chinese`) — your edits are authoritative and outrank auto terms. This
+file lives outside the plugin's own folder, so a plugin reinstall does not erase it.
+
 ### Behavior notes on the pipeline
 
 - **No mid-sentence splits**: long paragraphs are chunked **only at sentence
