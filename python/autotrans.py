@@ -81,11 +81,23 @@ def build_parser():
 
 
 def _resolve_action_and_pdf(args):
-    """兼容三种调用：`<pdf>`、`all <pdf>`、`extract <pdf>`。"""
+    """兼容四种调用：`<pdf>`、`all <pdf>`、`extract <pdf>`、`extract` + AUTOTRANS_PDF。
+
+    最后一种用于非 ASCII 路径：Windows 下冻结运行时的 argv 无法可靠承载
+    CJK 文件名（会被按 ANSI 解码而变成乱码），而环境变量是正常传递的，
+    所以调用方可以只传 action，把 PDF 路径放进 AUTOTRANS_PDF。
+    """
+    env_pdf = os.environ.get("AUTOTRANS_PDF", "").strip()
     if args.pdf is None:
-        # 只给了一个参数：可能是 `<pdf>` 或 `<action>`
+        # 只给了一个参数：可能是 `<pdf>`、`<action>`，或 <action> + 环境变量路径
         if args.action and args.action.lower().endswith(".pdf"):
             return "all", args.action
+        if env_pdf and os.path.exists(env_pdf):
+            action = (args.action or "all").lower()
+            if action not in ACTIONS:
+                print(f"未知动作 {args.action!r}，可用：{', '.join(ACTIONS)}", file=sys.stderr)
+                sys.exit(2)
+            return action, env_pdf
         print("缺少 PDF 路径。用法：python autotrans.py [action] <pdf> [选项]", file=sys.stderr)
         sys.exit(2)
     action = args.action.lower()

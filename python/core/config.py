@@ -53,6 +53,8 @@ DEFAULTS = {
         "skip_references": True,       # 跳过参考文献列表
         "skip_figure_captions": True,  # 跳过图注
         "auto_layout": True,           # 自动识别单/双栏与分栏位置
+        "full_width_lines": False,     # 双栏页中把跨栏通栏行(标题/摘要横幅)单独成组；默认关闭（优先保证内容完整）
+        "dedupe_page": False,          # 去除同一页重复文本层带来的整段重复
     },
 
     "translation": {

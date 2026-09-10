@@ -59,13 +59,24 @@ $pinArgs = @()
 function Resolve-OpenSslBin {
     param([string]$PythonExe)
     # _ssl sits in the interpreter's env; for conda it is <env>/Library/bin.
+    # NOTE: PyInstaller otherwise resolves a stale OpenSSL 3.0.x pair that does not
+    # match the interpreter's _ssl.pyd, which breaks every https call in the frozen
+    # runtime ("unknown url type: https"), so the pin matters.
     $candRoots = @()
-    $envRoot = Split-Path (Split-Path $PythonExe -Parent) -Parent   # <env> from <env>/python  or bin
+    $exeDir = Split-Path $PythonExe -Parent          # <env> or <env>/Scripts
+    $candRoots += $exeDir
+    $envRoot = Split-Path $exeDir -Parent            # <env> from <env>/python or <env>/Scripts
     if (Test-Path (Join-Path $envRoot "Library\bin")) { $candRoots += (Join-Path $envRoot "Library\bin") }
+    if (Test-Path (Join-Path $exeDir "Library\bin")) { $candRoots += (Join-Path $exeDir "Library\bin") }
     foreach ($r in $candRoots) {
         $ssl = Get-Item (Join-Path $r "libssl-3-x64.dll") -ErrorAction SilentlyContinue
         $crp = Get-Item (Join-Path $r "libcrypto-3-x64.dll") -ErrorAction SilentlyContinue
-        if ($ssl -and $crp) { Write-Host "  pin OpenSSL @ $r (libssl $($ssl.VersionInfo.FileVersion))"; return $r }
+        if ($ssl -and $crp) {
+            $pySsl = & $PythonExe -c "import ssl;print(ssl.OPENSSL_VERSION)" 2>$null
+            if ($pySsl) { Write-Host "  interpreter $pySsl" }
+            Write-Host "  pin OpenSSL @ $r (libssl $($ssl.VersionInfo.FileVersion))"
+            return $r
+        }
     }
     return $null
 }

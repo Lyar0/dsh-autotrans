@@ -35,15 +35,35 @@ def _norm(txt):
     return re.sub(r"[ \t]+", " ", txt).strip()
 
 
+def _rect_cls():
+    """取 pymupdf.Rect（不同版本模块名 fitz/pymupdf 不一），失败返回 None。"""
+    try:
+        return _load_pymupdf().Rect
+    except Exception:
+        return None
+
+
 def _line_items(doc, pno, body_top, body_bottom):
-    """返回页面文本行：{x0,x1,y0,y1,size,text}，已过滤页眉页脚。"""
-    d = doc[pno].get_text("dict")
+    """返回页面文本行（显示坐标系）：{x0,x1,y0,y1,size,text}，已过滤页眉页脚。
+
+    PyMuPDF 的行 bbox 位于 PDF 未旋转坐标系；对 /Rotate 90|270 的页面，
+    正文的横向坐标落在 bbox 的 y 轴上，会让 body_top/body_bottom 过滤与
+    分栏判定同时失效（正文整块被丢弃）。这里统一用页面 rotation_matrix
+    把 bbox 变换到“显示坐标系”后再过滤。
+    """
+    page = doc[pno]
+    d = page.get_text("dict")
+    m = getattr(page, "rotation_matrix", None)
+    rect_cls = _rect_cls()
     out = []
     for blk in d["blocks"]:
         if blk["type"] != 0:
             continue
         for l in blk["lines"]:
             x0, y0, x1, y1 = l["bbox"]
+            if m is not None and rect_cls is not None:
+                r = rect_cls(x0, y0, x1, y1) * m
+                x0, y0, x1, y1 = r.x0, r.y0, r.x1, r.y1
             if y1 < body_top or y0 > body_bottom:
                 continue
             spans = l["spans"]
@@ -59,13 +79,36 @@ def _line_items(doc, pno, body_top, body_bottom):
     return out
 
 
+def _pixel_width(doc, pno):
+    """页面显示宽度（pt），用于识别“跨栏通栏行”。"""
+    page = doc[pno]
+    try:
+        return float(page.rect.width)
+    except Exception:
+        return 612.0
+
+
+def _split_full_width(doc, pno, items, ratio=0.8):
+    """拆出跨栏通栏行（标题/作者/摘要横幅）。
+
+    双栏刊物首页常见：页宽 612pt，栏宽约 260pt，而标题/作者/摘要占据整幅页宽。
+    这类行的中心落在分栏中线上，会被 assign 到某一栏并混入该栏正文，造成
+    “摘要与引言交错”的乱序。这里按宽度把它们识别出来单独处理。
+    """
+    width = _pixel_width(doc, pno)
+    limit = width * ratio
+    return [it for it in items if (it["x1"] - it["x0"]) >= limit]
+
+
 def _estimate_columns(doc, pages, body_top, body_bottom):
-    """估计分栏：统计各行水平中心在 x<350 与 x>=350 的分布。若明显双峰则分栏。"""
+    """估计分栏：统计各行水平中心在 x<350 与 x>=350 的分布；跨栏通栏行不计入。"""
     left = right = 0
     for pno in pages:
         for it in _line_items(doc, pno, body_top, body_bottom):
             if it["size"] < 8:
                 continue
+            if (it["x1"] - it["x0"]) >= _pixel_width(doc, pno) * 0.8:
+                continue  # 通栏行（标题/横幅）不代表分栏
             mid = (it["x0"] + it["x1"]) / 2.0
             if mid < 350:
                 left += 1
@@ -78,9 +121,23 @@ def _median_body_size(doc, pages, body_top, body_bottom):
     sizes = []
     for pno in pages:
         for it in _line_items(doc, pno, body_top, body_bottom):
-            if 8.5 <= it["size"] <= 16 and it["size"] < 13:
+            if 7.0 <= it["size"] <= 16 and it["size"] < 13:
                 sizes.append(it["size"])
     return statistics.median(sizes) if sizes else 10.0
+
+
+def _min_font_for(configured, body_median):
+    """把正文最小字号阈值限制在正文字号之下。
+
+    两栏期刊常把正文排到 8.5pt（低于默认 8.9pt 阈值），此时整个正文会被当成
+    图注丢弃、只留下标题。这里以实测正文字号为上界（其 90%），既救回这类
+    PDF，又不会把明显更小的脚注/图注一起收进来。
+    """
+    try:
+        limit = float(body_median) * 0.9
+    except Exception:
+        return configured
+    return min(configured, round(limit, 2))
 
 
 FURNITURE = {"review", "open access", "original article", "research article", "editorial",
@@ -199,6 +256,39 @@ def _merge_overflow(units):
         out.append(dict(u))
     # 段尾孤句(整段仍不以句点结束)不改；已是信息最小残留
     return out
+
+
+def _dedupe_within_page(units):
+    """页内去重：去掉同一页中重复出现的同一段文字。
+
+    部分期刊 PDF（如 OUP 的 problem-solving protocol）会为同一段正文放置两份
+    文本层，低字号阈值下两份都会被提取，导致译文整段重复。这里以“同页内文字
+    等价”为判据只保留一份（正文优先晚出现的那份：其排版通常完整）。
+    """
+    def canon(t):
+        t = re.sub(r"^\s*\d{1,3}\.\s*", "", (t or "").strip())
+        return re.sub(r"[^a-z0-9]+", "", t.lower())
+
+    by_page = {}
+    for idx, u in enumerate(units):
+        by_page.setdefault(u.get("page"), []).append((idx, u))
+    drop = set()
+    for _page, items in by_page.items():
+        buckets = {}
+        for idx, u in items:
+            c = canon(u.get("text"))
+            if len(c) < 40:
+                continue
+            buckets.setdefault(c, []).append((idx, u))
+        for c, group in buckets.items():
+            if len(group) < 2:
+                continue
+            bodies = [g for g in group if g[1].get("kind") == "body"]
+            keep = (bodies or group)[-1][0]
+            for idx, _u in group:
+                if idx != keep:
+                    drop.add(idx)
+    return [u for i, u in enumerate(units) if i not in drop]
 
 
 def _segment_column(lines, body_median, page, ext):
@@ -376,6 +466,9 @@ def run(cfg):
     two_col = ext.get("auto_layout", True) and _estimate_columns(doc, scan, body_top, body_bottom)
     body_median = _median_body_size(doc, scan, body_top, body_bottom)
     col_split = ext.get("col_split", 300.0)
+    min_font_body = _min_font_for(ext.get("min_font", 8.9), body_median)
+    if min_font_body != ext.get("min_font", 8.9):
+        print(f"正文实测字号 {body_median:g}pt，正文提取下限自动下调为 {min_font_body:g}pt")
 
     units = []  # {kind,text,page}
     for pno in range(total):
@@ -383,7 +476,7 @@ def run(cfg):
         if page1 > last_page:
             break
         is_ref_page = (page1 == ref_page)
-        min_font = ext.get("tail_min_font", 7.0) if is_ref_page else ext.get("min_font", 8.9)
+        min_font = ext.get("tail_min_font", 7.0) if is_ref_page else min_font_body
         items = [it for it in _line_items(doc, pno, body_top, body_bottom)
                  if min_font <= it["size"] <= 28.0 and not _is_furniture(it)]
         if not items:
@@ -395,16 +488,33 @@ def run(cfg):
             for it in items:
                 it["col"] = 0
 
+        # 跨栏通栏行（首页标题/作者/摘要横幅）单独成组，避免其中心落在分栏中线上
+        # 而被并入某一栏、与栏内正文交错。按阅读顺序：页顶通栏 → 左栏 → 右栏 → 页底通栏。
+        wide_top, wide_bottom = [], []
+        if two_col and ext.get("full_width_lines", False):
+            wide_lines = _split_full_width(doc, pno, items)
+            if wide_lines:
+                items = [it for it in items if it not in wide_lines]
+                mids = sorted(it["y0"] for it in items) or [0.0]
+                mid = mids[len(mids) // 2]
+                wide_top = [it for it in wide_lines if it["y0"] < mid]
+                wide_bottom = [it for it in wide_lines if it["y0"] >= mid]
+
         # 参考文献页：丢弃 References 标题及其后的内容（含右栏参考文献列）
         if is_ref_page:
-            items = [it for it in items if not _is_reference_start(it) and it["y0"] < ref_y]
+            keep = (lambda it: not _is_reference_start(it) and it["y0"] < ref_y)
+            items = [it for it in items if keep(it)]
+            wide_top = [it for it in wide_top if keep(it)]
+            wide_bottom = [it for it in wide_bottom if keep(it)]
             if two_col:
                 # 参考文献通常独占右栏；为稳妥，仅保留左栏内容
                 items = [it for it in items if it["col"] == 0]
 
-        for col in sorted(set(it["col"] for it in items)):
-            col_lines = [it for it in items if it["col"] == col]
-            units.extend(_segment_column(col_lines, body_median, page1, ext))
+        groups = [g for g in ([wide_top] + [
+            [it for it in items if it["col"] == col]
+            for col in sorted(set(it["col"] for it in items))] + [wide_bottom]) if g]
+        for grp in groups:
+            units.extend(_segment_column(grp, body_median, page1, ext))
 
     # ---- 收集并落盘页面大图（供 Word 插图）；需在 doc 关闭前完成 ----
     images_dir = os.path.join(cfg["out_dir"], "images")
@@ -422,6 +532,8 @@ def run(cfg):
     # 合并“跨栏/跨页被截断”的同段正文：以一个未以句点结尾的 body 段为信号，
     # 把紧随的下一个 body 续接进来，修复“也表现出较高水平”这类句中被拆开各自翻译的问题。
     units = _merge_overflow(units)
+    if ext.get("dedupe_page", False):
+        units = _dedupe_within_page(units)
     for u in units:
         rec = {"print_page": u["page"], "pdf_page": u["page"], "text": u["text"], "kind": u["kind"]}
         if u.get("level") is not None:
