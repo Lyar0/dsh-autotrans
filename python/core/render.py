@@ -9,9 +9,39 @@ import os
 import re
 import html
 import zipfile
+import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+# XML 1.0 forbids C0 control characters except tab/LF/CR (and C1 is discouraged).
+# PDFs that encode math with a built-in font leak raw bytes such as 0x03 into the
+# extracted text, and an unsanitised one makes Word refuse the whole document
+# ("Word encountered an error trying to open the file"); EPUB readers also reject it.
+_XML_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _xml_text(t):
+    """XML 安全的文本：剔除 XML 1.0 非法控制字符，再转义 & < >。"""
+    return escape(_XML_CTRL_RE.sub("", str(t or "")))
+
+
+def _html_text(t):
+    """HTML 安全的文本：同样先剔除 XML/HTML 非法控制字符，再转义。"""
+    return html.escape(_XML_CTRL_RE.sub("", str(t or "")))
+
+
+def _assert_xml(text, part_name):
+    """写出前校验 XML 部件；不合法就带定位信息抛错，避免产出打不开的 DOCX。"""
+    parser = ET.XMLParser()
+    try:
+        parser.feed(text)
+        parser.close()
+    except ET.ParseError as exc:
+        bad = sorted(set(_XML_CTRL_RE.findall(text)))
+        detail = "含非法控制字符: " + " ".join(f"U+{ord(c):04X}" for c in bad) if bad else str(exc)
+        raise ValueError(f"生成的 {part_name} 不是合法 XML（{detail}），已阻止写出。") from exc
+
 
 
 def _heading_zh_map(data):
@@ -64,7 +94,7 @@ def _para_docx(text, style=None, align=None):
     props = f"<w:rPr>{style}</w:rPr>" if style else ""
     jc = f'<w:jc w:val="{align}"/>' if align else ""
     ppr = f"<w:pPr>{jc}</w:pPr>" if align else ""
-    return (f'<w:p>{ppr}<w:r>{props}<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>')
+    return (f'<w:p>{ppr}<w:r>{props}<w:t xml:space="preserve">{_xml_text(text)}</w:t></w:r></w:p>')
 
 
 # —— 图片插入相关常量 ——
@@ -288,6 +318,13 @@ def render_docx(cfg, data):
     suffix = "_中英对照" if _bilingual_enabled(cfg) else "_中文翻译"
     name = cfg["render"].get("docx_name") or _safe_basename(title, suffix, ".docx")
     out = os.path.join(cfg["out_dir"], name)
+    # 兜底校验：任何非法字符都会让 Word 以“Word 在试图打开文件时遇到错误”整体拒开，
+    # 所以写盘前先解析一遍每个 XML 部件，坏文件绝不落盘。
+    _assert_xml(docxml, "word/document.xml")
+    _assert_xml(content_types, "[Content_Types].xml")
+    _assert_xml(rels, "_rels/.rels")
+    _assert_xml(doc_rels, "word/_rels/document.xml.rels")
+    _assert_xml(styles, "word/styles.xml")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", content_types)
         z.writestr("_rels/.rels", rels)
@@ -340,8 +377,8 @@ def render_epub(cfg, data):
     toc = []
     cover = epub.EpubHtml(title="书名页", file_name="cover.xhtml", lang="zh-CN")
     cover.content = (f'<div style="text-align:center;margin-top:25%">'
-                     f'<h1 class="book">{html.escape(title)}</h1>'
-                     f'<p>{html.escape(data.get("author", ""))}</p><p>中文版</p></div>')
+                     f'<h1 class="book">{_html_text(title)}</h1>'
+                     f'<p>{_html_text(data.get("author", ""))}</p><p>中文版</p></div>')
     cover.add_item(css_item)
     book.add_item(cover)
     spine.append(cover)
@@ -350,7 +387,7 @@ def render_epub(cfg, data):
     bilingual = _bilingual_enabled(cfg)
     for ci, ch in enumerate(data["chapters"]):
         ctitle = ch["title"]
-        parts = [f'<h2 class="chapter">{html.escape(ctitle)}</h2>']
+        parts = [f'<h2 class="chapter">{_html_text(ctitle)}</h2>']
         for p in ch["paragraphs"]:
             for spec in _content_specs(p, bilingual):
                 text = (spec.get("text") or "").strip()
@@ -359,14 +396,14 @@ def render_epub(cfg, data):
                 if spec.get("lang") == "en":
                     tag = "h3" if spec.get("kind") == "heading" else "p.en"
                     cls = ' class="section"' if tag == "h3" else ' class="en"'
-                    parts.append(f'<{tag}{cls}>{html.escape(text)}</{tag}>')
+                    parts.append(f'<{tag}{cls}>{_html_text(text)}</{tag}>')
                     continue
                 if spec.get("untranslated"):
-                    parts.append(f'<p class="en fallback">[未翻译] {html.escape(text)}</p>')
+                    parts.append(f'<p class="en fallback">[未翻译] {_html_text(text)}</p>')
                     continue
                 tag = "h3" if spec.get("kind") == "heading" else "p"
                 cls = ' class="section"' if tag == "h3" else ""
-                parts.append(f'<{tag}{cls}>{html.escape(text)}</{tag}>')
+                parts.append(f'<{tag}{cls}>{_html_text(text)}</{tag}>')
         body = "\n".join(parts)
         item = epub.EpubHtml(title=ctitle, file_name=f"ch{ci:02d}.xhtml", lang="zh-CN")
         item.content = (f'<html><head><link rel="stylesheet" href="style.css"/></head>'

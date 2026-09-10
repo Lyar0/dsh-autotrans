@@ -201,4 +201,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    _dbg = os.environ.get("AUTOTRANS_DEBUG_SCRIPT")
+    if _dbg:
+        exec(compile(open(_dbg, encoding="utf-8").read(), _dbg, "exec"), {"__name__": "__main__"})
+        sys.exit(0)
     sys.exit(main())
