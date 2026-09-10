@@ -9,7 +9,6 @@ import os
 import re
 import html
 import zipfile
-import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -32,15 +31,33 @@ def _html_text(t):
 
 
 def _assert_xml(text, part_name):
-    """写出前校验 XML 部件；不合法就带定位信息抛错，避免产出打不开的 DOCX。"""
-    parser = ET.XMLParser()
-    try:
-        parser.feed(text)
-        parser.close()
-    except ET.ParseError as exc:
-        bad = sorted(set(_XML_CTRL_RE.findall(text)))
-        detail = "含非法控制字符: " + " ".join(f"U+{ord(c):04X}" for c in bad) if bad else str(exc)
-        raise ValueError(f"生成的 {part_name} 不是合法 XML（{detail}），已阻止写出。") from exc
+    """写出前校验 XML 部件，避免产出 Word 打不开的包。
+
+    这里刻意不依赖解析器：PyInstaller 的冻结运行时里 `xml.etree` 不可用
+    （缺 expat 扩展模块），所以只做两件针对性的检查——
+      1. 不允许出现 XML 1.0 非法控制字符（本次故障的直接成因）；
+      2. 标签必须成对闭合（检测拼接出来的部件是否被截断/写坏）。
+    """
+    bad = sorted(set(_XML_CTRL_RE.findall(text)))
+    if bad:
+        codes = " ".join(f"U+{ord(c):04X}" for c in bad)
+        raise ValueError(f"生成的 {part_name} 含 XML 非法控制字符（{codes}），已阻止写出。")
+
+    stack = []
+    for m in re.finditer(r"<\s*(/?)\s*([A-Za-z_][\w.:-]*)((?:\"[^\"]*\"|'[^']*'|[^>\"'])*?)(/?)\s*>", text):
+        closing, name, _attrs, self_close = m.group(1), m.group(2), m.group(3), m.group(4)
+        if name.startswith("?"):          # <?xml ... ?>
+            continue
+        if self_close:                    # <foo/>
+            continue
+        if closing:
+            if not stack or stack[-1] != name:
+                raise ValueError(f"生成的 {part_name} 标签不匹配（遇到 </{name}>），已阻止写出。")
+            stack.pop()
+        else:
+            stack.append(name)
+    if stack:
+        raise ValueError(f"生成的 {part_name} 有未闭合标签（{stack[-1]}），已阻止写出。")
 
 
 
@@ -140,7 +157,7 @@ def _fit_emu(img_w_px, img_h_px, max_w_emu, max_h_emu=None):
 
 
 def _bilingual_enabled(cfg):
-    return str(cfg.get("render", {}).get("mode", "cn")).lower() in ("bilingual", "en-zh", "en_zh", "enzh")
+    return str(cfg.get("render", {}).get("mode", "bilingual")).lower() in ("bilingual", "en-zh", "en_zh", "enzh")
 
 
 def _content_specs(p, bilingual):

@@ -72,9 +72,9 @@ DEFAULTS = {
 
     "render": {
         "format": "docx",             # docx | epub | both
-        "mode": "cn",                 # cn（仅中文，默认）| bilingual / en-zh（逐段中英对照：一段英文+一段中文）
-        "docx_name": "",              # 留空自动 <书名>_中文翻译.docx
-        "epub_name": "",              # 留空自动 <书名>_中文版.epub
+        "mode": "bilingual",          # bilingual（默认：逐段中英对照，一段英文+一段中文）| cn（仅中文）
+        "docx_name": "",              # 留空自动 <书名>_中英对照.docx
+        "epub_name": "",              # 留空自动 <书名>_中英对照.epub
     },
 }
 

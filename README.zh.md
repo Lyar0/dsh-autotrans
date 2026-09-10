@@ -105,7 +105,7 @@ profile 重启后，智能体即拥有 `autotrans` 工具。让它翻译一个 P
 | `model` | DeepSeek 模型（默认 `deepseek-chat`）。 |
 | `concurrency` | 并发请求数（默认 4）。 |
 | `format` | `docx` / `epub` / `both`。 |
-| `mode` | `cn`（默认，仅中文）或 `bilingual`（一段英文紧接一段中文的逐段对照）。 |
+| `mode` | `bilingual`（默认：一段英文紧接一段中文的逐段对照）或 `cn`（仅中文）。 |
 | `api_key` | DeepSeek API Key（否则读 `DEEPSEEK_API_KEY` 环境变量）。 |
 | `config_path` | 高级选项的 JSON 配置文件路径。 |
 | `allow_zotero_out` | 仅用于绕过 Zotero 保护（见下）。 |

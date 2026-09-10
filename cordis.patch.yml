@@ -24,3 +24,4 @@
         model: deepseek-chat
         concurrency: 4
         format: docx
+        mode: bilingual        # 默认逐段中英对照（一段英文 + 一段中文）；改 cn 则只输出中文

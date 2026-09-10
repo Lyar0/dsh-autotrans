@@ -117,7 +117,7 @@ The tool accepts:
 | `model` | DeepSeek model (default `deepseek-chat`). |
 | `concurrency` | Concurrent requests (default 4). |
 | `format` | `docx` / `epub` / `both`. |
-| `mode` | `cn` (default, Chinese only) or `bilingual` (one English paragraph then its Chinese translation, interleaved). |
+| `mode` | `bilingual` (default: each English paragraph immediately followed by its Chinese translation) or `cn` (Chinese only). |
 | `api_key` | DeepSeek API key (otherwise `DEEPSEEK_API_KEY` env var). |
 | `config_path` | A JSON config file for advanced options. |
 | `allow_zotero_out` | Only to override the Zotero guard (see below). |
@@ -183,15 +183,16 @@ Advanced extraction/translation thresholds live in a JSON config file
 (`python/config.example.json`): extract geometry, batch sizes, temperature, custom system
 prompts, output file names, and `render.mode`.
 
-### Chinese-only vs bilingual render
+### Bilingual vs Chinese-only render
 
-By default the document is rendered **Chinese-only** (`render.mode: cn`). Set `mode` to
-`bilingual` to lay out each paragraph as one **English paragraph immediately followed by
-its Chinese translation**, so the two languages alternate block by block for easy
-side-by-side proofreading. Influence it via the tool call (`--mode bilingual`), the
-rendered JSON config (`render.mode`), or the agent-visible `mode` argument. Bilingual
-files are named `…_中英对照.docx` / `…_中英对照.epub`; the interplay keeps figures at
-their page position in both modes.
+By default the document is rendered **bilingual** (`render.mode: bilingual`): each
+paragraph is laid out as one **English paragraph immediately followed by its Chinese
+translation**, so the two languages alternate block by block for easy side-by-side
+proofreading. Set `mode` to `cn` for a **Chinese-only** document. Influence it via the
+tool call (`--mode cn`), the rendered JSON config (`render.mode`), or the agent-visible
+`mode` argument. Bilingual files are named `…_中英对照.docx` / `…_中英对照.epub` and
+Chinese-only ones `…_中文翻译.docx` / `…_中文版.epub`; figures keep their page position
+in both modes.
 
 `translation.auto_glossary` is on by default: before translating, the model scans the
 document and builds a `auto_glossary.tsv` domain glossary for the current literature,

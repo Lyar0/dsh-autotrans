@@ -1,6 +1,6 @@
 ﻿{
   "name": "dsh-autotrans",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "DSH plugin bundle: translate English academic PDFs/books into Chinese via the DeepSeek API (extract → translate → DOCX/EPUB), with glossary constraints and resumable translation.",
   "type": "module",
   "main": "lib/index.js",
