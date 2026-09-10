@@ -5,7 +5,9 @@ __pycache__/
 .eggs/
 build/
 dist/
-runtime/          # self-contained runtime downloaded via scripts/get-runtime.ps1
+# self-contained runtime fetched by scripts/get-runtime.ps1; no inline comment on the
+# pattern line below — gitignore has no inline comments and would treat it as one pattern
+runtime/
 .venv/
 venv/
 env/

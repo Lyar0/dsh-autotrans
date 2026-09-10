@@ -108,6 +108,18 @@ profile 重启后，智能体即拥有 `autotrans` 工具。让它翻译一个 P
 | `mode` | `cn`（默认，仅中文）或 `bilingual`（一段英文紧接一段中文的逐段对照）。 |
 | `api_key` | DeepSeek API Key（否则读 `DEEPSEEK_API_KEY` 环境变量）。 |
 | `config_path` | 高级选项的 JSON 配置文件路径。 |
+| `allow_zotero_out` | 仅用于绕过 Zotero 保护（见下）。 |
+
+### 不写入 Zotero 存储目录
+
+Zotero 会持续监听自己的 `storage/` 目录并持有其中文件句柄，因此写在那里的
+DOCX 往往被锁住、Word 打不开（翻译本身没失败，只是文件一直被占用）。
+插件默认**拒绝**把输出写进 Zotero 的 `storage/` 目录（按 `…/Zotero/storage/`
+或 `…/storage/<8 位条目 key>/` 两种形态识别，Zotero 数据目录搬家也照样命中），
+并返回一条可读的错误、提示改用工作区路径；确需覆盖时传 `allow_zotero_out: true`。
+
+推荐把译文留在工作区内（工具默认即 `<workspace>/autotrans/<pdf 主干名>/`），
+需要时再自己拷到别处。
 
 在 DSH 运行环境中一次性设置 API Key（`DEEPSEEK_API_KEY=sk-...`），或每次调用通过
 `api_key` 传入。两者都没有时，插件会自动从 DSH 自身的凭据文件

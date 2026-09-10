@@ -120,6 +120,20 @@ The tool accepts:
 | `mode` | `cn` (default, Chinese only) or `bilingual` (one English paragraph then its Chinese translation, interleaved). |
 | `api_key` | DeepSeek API key (otherwise `DEEPSEEK_API_KEY` env var). |
 | `config_path` | A JSON config file for advanced options. |
+| `allow_zotero_out` | Only to override the Zotero guard (see below). |
+
+### Never written into Zotero's storage directory
+
+Zotero watches its own `storage/` tree and keeps handles on the files it holds, so a
+DOCX written there tends to stay locked and cannot be opened in Word (the translation
+itself did not fail — only the file stays occupied). The plugin therefore **refuses**
+to write output under Zotero's `storage/` (recognised both as `…/Zotero/storage/` and
+as `…/storage/<8-char item key>/`, so a relocated Zotero data directory is still
+caught) and returns a readable error pointing at the workspace instead. Pass
+`allow_zotero_out: true` only if you really need to override it.
+
+Keep translations in the workspace (the default is
+`<workspace>/autotrans/<pdf-stem>/`) and copy them elsewhere yourself when needed.
 
 Set the API key once in the environment where DSH runs (`DEEPSEEK_API_KEY=sk-...`), or
 pass it per call via `api_key`. If neither is set, the plugin automatically reads the key
